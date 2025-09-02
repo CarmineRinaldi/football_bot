@@ -11,12 +11,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Variabili d'ambiente ---
-TOKEN = os.environ.get("TG_BOT_TOKEN")
+TOKEN = "8488759682:AAEdaxTctJ1Yy21fIhXqIl9Y3IJf2VdJnC8"
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # es: https://football-bot-ric2.onrender.com
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
 
-if not TOKEN or not WEBHOOK_URL:
-    logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti!")
+if not WEBHOOK_URL:
+    logger.error("Variabile WEBHOOK_URL mancante!")
     exit(1)
 
 bot = telebot.TeleBot(TOKEN)
@@ -66,12 +66,21 @@ def stripe_webhook():
     except Exception as e:
         logger.error("Errore webhook Stripe: %s", e)
         return jsonify({"error": str(e)}), 400
-    return jsonify({"status": "ok"}), 200 if success else 400
+
+    if success:
+        return jsonify({"status": "ok"}), 200
+    else:
+        return jsonify({"error": "Stripe webhook failed"}), 400
 
 # --- Health check ---
 @app.route("/healthz")
 def health():
     return jsonify({"status": "ok"}), 200
+
+# --- Test endpoint ---
+@app.route("/test")
+def test():
+    return jsonify({"status": "server ok"}), 200
 
 # --- Main ---
 if __name__ == "__main__":
