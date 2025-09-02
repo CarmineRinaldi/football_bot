@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import os
 import telebot
 import logging
@@ -39,37 +39,44 @@ def telegram_webhook():
         bot.process_new_updates([update])
     except Exception as e:
         logger.error("Errore webhook Telegram: %s", e)
-        return "Errore", 400
-    return "OK", 200
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"status": "ok"}), 200
 
 # --- Endpoint admin per invio pronostici ---
 @app.route("/admin/send_today", methods=["POST"])
 def send_today():
     token = request.args.get("token")
     if token != ADMIN_TOKEN:
-        return "Forbidden", 403
-    for uid in get_all_users():
-        send_daily_to_user(bot, uid)
-    return "Invio avviato", 200
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        for uid in get_all_users():
+            send_daily_to_user(bot, uid)
+    except Exception as e:
+        logger.error("Errore invio pronostici: %s", e)
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "invio avviato"}), 200
 
 # --- Webhook Stripe ---
 @app.route("/stripe/webhook", methods=["POST"])
 def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get("Stripe-Signature")
-    success = handle_stripe_webhook(payload, sig_header)
-    return ("OK", 200) if success else ("Errore", 400)
+    try:
+        success = handle_stripe_webhook(payload, sig_header)
+    except Exception as e:
+        logger.error("Errore webhook Stripe: %s", e)
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"status": "ok"}), 200 if success else 400
 
 # --- Health check ---
 @app.route("/healthz")
 def health():
-    return {"status": "ok"}, 200
+    return jsonify({"status": "ok"}), 200
 
 # --- Main ---
 if __name__ == "__main__":
     init_db()
     bot.remove_webhook()
-    # 👉 ora Telegram punta a /telegram, non più /{TOKEN}
     bot.set_webhook(url=f"{WEBHOOK_URL}/telegram")
     logger.info("Bot webhook impostato su %s/telegram", WEBHOOK_URL)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
