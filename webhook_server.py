@@ -30,12 +30,22 @@ def start(message):
     add_user(user_id, username)
     bot.send_message(user_id, "Benvenuto! Riceverai i pronostici ogni giorno!")
 
+@bot.message_handler(commands=["list_users"])
+def list_users_cmd(message):
+    user_id = message.from_user.id
+    # Controllo se sei admin
+    if user_id != 890059567:  # <--- sostituisci con il tuo ID Telegram
+        bot.send_message(user_id, "Non autorizzato")
+        return
+    users = get_all_users()
+    bot.send_message(user_id, "Utenti salvati: " + ", ".join(map(str, users)))
+
 # --- Webhook Telegram ---
 @app.route("/telegram", methods=["POST"])
 def telegram_webhook():
     try:
         json_str = request.get_data(as_text=True)
-        logger.info("📩 Update ricevuto da Telegram: %s", json_str)  # 👈 DEBUG
+        logger.info("📩 Update ricevuto da Telegram: %s", json_str)
         update = telebot.types.Update.de_json(json_str)
         bot.process_new_updates([update])
     except Exception as e:
