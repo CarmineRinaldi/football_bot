@@ -11,12 +11,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Variabili d'ambiente ---
-TOKEN = "8488759682:AAEdaxTctJ1Yy21fIhXqIl9Y3IJf2VdJnC8"
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # es: https://football-bot-ric2.onrender.com
+TOKEN = os.environ.get("TG_BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
 
-if not WEBHOOK_URL:
-    logger.error("Variabile WEBHOOK_URL mancante!")
+if not TOKEN or not WEBHOOK_URL:
+    logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti!")
     exit(1)
 
 bot = telebot.TeleBot(TOKEN)
@@ -31,14 +31,9 @@ def start(message):
     bot.send_message(user_id, "Benvenuto! Riceverai i pronostici ogni giorno!")
 
 @bot.message_handler(commands=["list_users"])
-def list_users_cmd(message):
-    user_id = message.from_user.id
-    # Controllo se sei admin
-    if user_id != 890059567:  # <--- sostituisci con il tuo ID Telegram
-        bot.send_message(user_id, "Non autorizzato")
-        return
-    users = get_all_users()
-    bot.send_message(user_id, "Utenti salvati: " + ", ".join(map(str, users)))
+def list_users_command(message):
+    user_ids = get_all_users()
+    bot.send_message(message.chat.id, f"Utenti registrati:\n{user_ids}")
 
 # --- Webhook Telegram ---
 @app.route("/telegram", methods=["POST"])
@@ -53,7 +48,7 @@ def telegram_webhook():
         return jsonify({"error": str(e)}), 400
     return jsonify({"status": "ok"}), 200
 
-# --- Endpoint admin per invio pronostici ---
+# --- Endpoint admin ---
 @app.route("/admin/send_today", methods=["POST"])
 def send_today():
     token = request.args.get("token")
@@ -78,10 +73,7 @@ def stripe_webhook():
         logger.error("Errore webhook Stripe: %s", e)
         return jsonify({"error": str(e)}), 400
 
-    if success:
-        return jsonify({"status": "ok"}), 200
-    else:
-        return jsonify({"error": "Stripe webhook failed"}), 400
+    return jsonify({"status": "ok"}), 200 if success else 400
 
 # --- Health check ---
 @app.route("/healthz")
