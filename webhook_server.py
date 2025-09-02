@@ -89,3 +89,14 @@ if __name__ == "__main__":
     bot.set_webhook(url=f"{WEBHOOK_URL}/telegram")
     logger.info("Bot webhook impostato su %s/telegram", WEBHOOK_URL)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
+    try:
+        json_str = request.get_data(as_text=True)
+        logger.info("📩 Update ricevuto da Telegram: %s", json_str)  # 👈 DEBUG
+        update = telebot.types.Update.de_json(json_str)
+        bot.process_new_updates([update])
+    except Exception as e:
+        logger.error("Errore webhook Telegram: %s", e)
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"status": "ok"}), 200
