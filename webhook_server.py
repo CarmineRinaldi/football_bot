@@ -58,27 +58,28 @@ application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# 🔧 Inizializza bot (solo una volta)
-asyncio.get_event_loop().run_until_complete(application.initialize())
+# 🔧 Inizializza bot e loop
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+loop.run_until_complete(application.initialize())
+application.loop = loop  # assegna il loop all'applicazione
 
 # -------------------------------
 # Webhook endpoint
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Riceve gli update da Telegram e li processa in modo thread-safe."""
+    """Riceve update da Telegram e li processa in modo thread-safe."""
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
 
-    # Processa l'update sul loop dell'applicazione, thread-safe
-    future = asyncio.run_coroutine_threadsafe(application.process_update(update), application.loop)
-
     try:
-        future.result(timeout=5)  # opzionale: aspetta massimo 5 secondi
+        future = asyncio.run_coroutine_threadsafe(application.process_update(update), application.loop)
+        future.result(timeout=10)  # aspetta massimo 10 secondi
+        return "ok"
     except Exception as e:
-        logger.exception("Errore processando update")
-
-    return "ok"
+        logger.exception("Errore processando update:")
+        return "error", 500
 
 # -------------------------------
 # Endpoint per debug
@@ -97,7 +98,7 @@ def set_webhook():
         return await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
 
     try:
-        success = asyncio.get_event_loop().run_until_complete(setup_webhook())
+        success = asyncio.run_coroutine_threadsafe(setup_webhook(), application.loop).result()
     except Exception as e:
         logger.exception("Errore impostando il webhook")
         return jsonify({"status": "error", "message": str(e)}), 500
