@@ -4,10 +4,11 @@ import logging
 from flask import Flask, request, jsonify
 import telebot
 import json
+from datetime import date
 
 # --- moduli locali ---
 from db import init_db, add_user, get_all_users, is_vip, add_ticket, get_user_tickets
-from bot_logic import send_daily_to_user
+from bot_logic import send_daily_to_user, generate_daily_tickets_for_user
 
 # =========================
 # Config & oggetti globali
@@ -83,20 +84,40 @@ def start(message):
     except Exception as e:
         logger.exception("Errore handler /start: %s", e)
 
-@bot.message_handler(commands=["get_tickets"])
-def get_tickets(message):
+@bot.message_handler(commands=["mytickets"])
+def mytickets(message):
     try:
         user_id = message.from_user.id
-        tickets = get_user_tickets(user_id)
+        vip = is_vip(user_id)
+        today = str(date.today())
+        # Genera le schedine se non ci sono
+        generate_daily_tickets_for_user(user_id, vip)
+        tickets = get_user_tickets(user_id, today)
         if not tickets:
-            bot.send_message(user_id, "Non hai ancora schedine. Aspetta i prossimi pronostici!")
+            bot.send_message(user_id, "Non ci sono schedine disponibili oggi.")
             return
         for idx, t in enumerate(tickets, 1):
-            # Mostra solo come testo JSON
-            bot.send_message(user_id, f"Schedina {idx}:\n{json.dumps(t, indent=2)}")
+            if not vip:
+                # Free user: mostra solo 3 pronostici per schedina
+                limited_preds = t["predictions"][:3]
+                t_display = {"predictions": limited_preds}
+            else:
+                t_display = t
+            bot.send_message(user_id, f"Schedina {idx}:\n{json.dumps(t_display, indent=2)}")
     except Exception as e:
-        logger.exception("Errore handler /get_tickets: %s", e)
+        logger.exception("Errore handler /mytickets: %s", e)
         bot.send_message(message.chat.id, "Errore nel recupero schedine.")
+
+@bot.message_handler(commands=["upgrade"])
+def upgrade(message):
+    try:
+        user_id = message.from_user.id
+        bot.send_message(user_id,
+                         "🔥 Vuoi diventare VIP e sbloccare tutte le schedine e pronostici?\n"
+                         "Visita questo link per il pagamento e upgrade: [INSERISCI LINK STRIPE QUI]")
+    except Exception as e:
+        logger.exception("Errore handler /upgrade: %s", e)
+        bot.send_message(message.chat.id, "Errore nel processo di upgrade.")
 
 @bot.message_handler(func=lambda m: True)
 def echo(message):
@@ -124,4 +145,4 @@ def send_today():
         logger.exception("Errore invio pronostici: %s", e)
         return jsonify({"error": "internal"}), 500
 
-# ... mantieni set_webhook, delete_webhook, stripe_webhook come prima
+# set_webhook, delete_webhook e stripe_webhook mantieni come prima
