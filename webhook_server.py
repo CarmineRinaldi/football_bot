@@ -23,8 +23,13 @@ TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
 
+logger.info("Variabili d'ambiente lette:")
+logger.info("TG_BOT_TOKEN: %s", "SET" if TOKEN else "MANCANTE")
+logger.info("WEBHOOK_URL: %s", "SET" if WEBHOOK_URL else "MANCANTE")
+logger.info("ADMIN_HTTP_TOKEN: %s", ADMIN_TOKEN)
+
 if not TOKEN or not WEBHOOK_URL:
-    logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti!")
+    logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti! Verifica i Secret Files su Render.")
     exit(1)
 
 bot = telebot.TeleBot(TOKEN)
@@ -102,7 +107,6 @@ def callback_handler(call):
         if user.get("plan") == "vip":
             bot.send_message(user_id, "💎 Sei già un utente VIP!", reply_markup=main_menu())
         else:
-            # Integrazione Stripe abbonamento VIP
             set_user_plan(user_id, "vip")
             bot.send_message(user_id, "🎉 Complimenti! Sei diventato VIP e avrai accesso illimitato ai pronostici.", reply_markup=main_menu())
 
@@ -111,7 +115,6 @@ def callback_handler(call):
         if user.get("plan") == "pay" and user.get("ticket_quota", 0) > 0:
             bot.send_message(user_id, f"📋 Hai ancora {user['ticket_quota']} schedine disponibili.", reply_markup=main_menu())
         else:
-            # Integrazione Stripe per pacchetto schedine
             bot.send_message(user_id, "💰 Acquista un pacchetto da 2€ per ricevere 10 schedine extra (Stripe da integrare).", reply_markup=main_menu())
 
     else:
@@ -174,6 +177,7 @@ def health():
 # =========================
 if __name__ == "__main__":
     init_db()
+    logger.info("Avvio bot...")
     bot.remove_webhook()
     bot.set_webhook(url=f"{WEBHOOK_URL}/telegram")
     logger.info("Bot webhook impostato su %s/telegram", WEBHOOK_URL)
