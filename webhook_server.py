@@ -7,7 +7,7 @@ import json
 from datetime import date
 
 # --- moduli locali ---
-from db import init_db, add_user, get_all_users, is_vip, add_ticket, get_user_tickets
+from db import init_db, add_user, get_all_users, is_vip_user, add_ticket, get_user_tickets
 from bot_logic import send_daily_to_user, generate_daily_tickets_for_user
 
 # =========================
@@ -88,7 +88,7 @@ def start(message):
 def mytickets(message):
     try:
         user_id = message.from_user.id
-        vip = is_vip(user_id)
+        vip = is_vip_user(user_id)
         today = str(date.today())
         # Genera le schedine se non ci sono
         generate_daily_tickets_for_user(user_id, vip)
