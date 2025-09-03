@@ -1,14 +1,16 @@
+# webhook_server.py
 import os
 import logging
 from flask import Flask, request, jsonify
 import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from db import (
     init_db, add_user, get_all_users, get_user, set_user_plan,
     set_user_categories, get_user_tickets, decrement_ticket_quota
 )
 from bot_logic import send_daily_to_user, generate_daily_tickets_for_user
-from payments import handle_stripe_webhook  # già implementato per VIP/Pay
+from payments import handle_stripe_webhook
 
 # =========================
 # Logging
@@ -17,12 +19,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # =========================
-# Funzione lettura secrets
+# Funzione lettura secrets (Render)
 # =========================
 def read_secret_file(name: str):
-    """
-    Legge un secret da /run/secrets/<name> (Render).
-    """
     try:
         path = f"/run/secrets/{name}"
         if os.path.exists(path):
@@ -39,26 +38,13 @@ TOKEN = os.environ.get("TG_BOT_TOKEN") or read_secret_file("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL") or read_secret_file("WEBHOOK_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN") or "metti_un_token_lungo"
 
-# Stripe
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY") or read_secret_file("STRIPE_SECRET_KEY")
 STRIPE_ENDPOINT_SECRET = os.environ.get("STRIPE_ENDPOINT_SECRET") or read_secret_file("STRIPE_ENDPOINT_SECRET")
 
-# API football
 API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY") or read_secret_file("API_FOOTBALL_KEY")
 
-# =========================
-# Debug variabili
-# =========================
-logger.info("Variabili d'ambiente lette:")
-logger.info("TG_BOT_TOKEN: %s", "OK" if TOKEN else "MANCANTE")
-logger.info("WEBHOOK_URL: %s", "OK" if WEBHOOK_URL else "MANCANTE")
-logger.info("ADMIN_HTTP_TOKEN: %s", ADMIN_TOKEN[:6] + "..." if ADMIN_TOKEN else "MANCANTE")
-logger.info("STRIPE_SECRET_KEY: %s", "OK" if STRIPE_SECRET_KEY else "MANCANTE")
-logger.info("STRIPE_ENDPOINT_SECRET: %s", "OK" if STRIPE_ENDPOINT_SECRET else "MANCANTE")
-logger.info("API_FOOTBALL_KEY: %s", "OK" if API_FOOTBALL_KEY else "MANCANTE")
-
 if not TOKEN or not WEBHOOK_URL:
-    logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti! Verifica Env Vars o Secret Files.")
+    logger.error("TG_BOT_TOKEN o WEBHOOK_URL mancanti!")
     exit(1)
 
 bot = telebot.TeleBot(TOKEN)
@@ -67,8 +53,6 @@ app = Flask(__name__)
 # =========================
 # Menu inline
 # =========================
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 def main_menu():
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -94,24 +78,15 @@ def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     logger.info("Ricevuto /start da %s (%s)", user_id, username)
-    try:
-        add_user(user_id, username)
-        logger.info("Utente %s registrato correttamente", user_id)
-    except Exception as e:
-        logger.error("Errore add_user: %s", e)
 
-    try:
-        bot.send_message(
-            user_id,
-            "⚽ Benvenuto nel bot pronostici! Usa il menu qui sotto per gestire i tuoi campionati e le schedine.",
-            reply_markup=main_menu()
-        )
-        logger.info("Messaggio di benvenuto inviato a %s", user_id)
-    except Exception as e:
-        logger.error("Errore invio messaggio start: %s", e)
+    add_user(user_id, username)
 
+    bot.send_message(
+        user_id,
+        "⚽ Benvenuto nel bot pronostici! Usa il menu qui sotto per gestire i tuoi campionati e le schedine.",
+        reply_markup=main_menu()
+    )
 
-# Fallback per qualsiasi messaggio
 @bot.message_handler(func=lambda m: True)
 def all_messages(message):
     logger.info("Messaggio generico ricevuto da %s: %s", message.from_user.id, message.text)
