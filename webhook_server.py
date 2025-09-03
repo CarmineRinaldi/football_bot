@@ -6,6 +6,13 @@ from database import add_user, decrement_pronostico
 from football_api import get_pronostico
 from payments import create_checkout_session
 import asyncio
+import logging
+
+# -------------------------------
+# Config logging
+# -------------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # -------------------------------
 # Flask app
@@ -56,9 +63,13 @@ application.add_handler(CallbackQueryHandler(button_handler))
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.create_task(application.process_update(update))
-    return "ok"
+    try:
+        update = Update.de_json(request.get_json(force=True), application.bot)
+        asyncio.create_task(application.process_update(update))
+        return "ok"
+    except Exception as e:
+        logger.exception("Errore nel processing webhook")
+        return "error", 500
 
 # -------------------------------
 # Endpoint per debug
@@ -72,18 +83,15 @@ def index():
 # -------------------------------
 @app.route("/set_webhook", methods=["GET"])
 def set_webhook():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
     async def setup_webhook():
-        # cancella vecchio webhook se esiste
         await application.bot.delete_webhook()
-        # imposta il nuovo webhook
-        success = await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
-        return success
+        return await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
 
-    success = loop.run_until_complete(setup_webhook())
-    loop.close()
+    try:
+        success = asyncio.run(setup_webhook())
+    except Exception as e:
+        logger.exception("Errore impostando il webhook")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
     if success:
         return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
