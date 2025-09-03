@@ -1,78 +1,66 @@
 import os
 import stripe
 import logging
-from db import set_user_plan, decrement_ticket_quota
+from db import set_user_plan
 
+# --- Config logging ---
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# =========================
-# Chiavi Stripe
-# =========================
+# --- Chiavi Stripe ---
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 endpoint_secret = os.environ.get("STRIPE_ENDPOINT_SECRET")
 
 if not stripe.api_key or not endpoint_secret:
     logger.error("Variabili STRIPE_SECRET_KEY o STRIPE_ENDPOINT_SECRET mancanti!")
-    exit(1)
+    raise RuntimeError("Stripe non configurato")
+
+# --- Config prezzi pacchetti ---
+PRICE_IDS = {
+    "vip": os.environ.get("STRIPE_PRICE_VIP"),    # es: piano VIP mensile
+    "pay_10": os.environ.get("STRIPE_PRICE_PAY10")  # es: pacchetto 10 schedine a pagamento
+}
+
+if not PRICE_IDS["vip"] or not PRICE_IDS["pay_10"]:
+    logger.error("ID prezzi Stripe mancanti!")
+    raise RuntimeError("Stripe price IDs mancanti")
+
 
 # =========================
-# Crea sessione Stripe per VIP
+# Creazione checkout session
 # =========================
-def create_vip_checkout_session(user_id, success_url, cancel_url):
+def create_checkout_session(user_id, plan_type):
+    """
+    Crea una sessione Stripe Checkout per l’utente.
+    plan_type: "vip" o "pay_10"
+    """
+    price_id = PRICE_IDS.get(plan_type)
+    if not price_id:
+        logger.error("Plan type non valido: %s", plan_type)
+        return None
+
     try:
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             mode="payment",
-            line_items=[{
-                "price_data": {
-                    "currency": "eur",
-                    "product_data": {"name": "Abbonamento VIP"},
-                    "unit_amount": 500,  # 5€ ad esempio
-                },
-                "quantity": 1
-            }],
-            metadata={"user_id": str(user_id), "plan": "vip"},
-            success_url=success_url,
-            cancel_url=cancel_url
+            line_items=[{"price": price_id, "quantity": 1}],
+            metadata={"user_id": str(user_id), "plan_type": plan_type},
+            success_url=os.environ.get("SUCCESS_URL", "https://yourdomain.com/success"),
+            cancel_url=os.environ.get("CANCEL_URL", "https://yourdomain.com/cancel")
         )
         return session.url
     except Exception as e:
-        logger.error("Errore creazione sessione VIP Stripe: %s", e)
+        logger.exception("Errore creazione checkout session: %s", e)
         return None
 
-# =========================
-# Crea sessione Stripe per Pacchetto Pay
-# =========================
-def create_pay_package_session(user_id, success_url, cancel_url, quantity=10):
-    try:
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            mode="payment",
-            line_items=[{
-                "price_data": {
-                    "currency": "eur",
-                    "product_data": {"name": f"Pacchetto {quantity} schedine"},
-                    "unit_amount": 200,  # 2€ in centesimi
-                },
-                "quantity": 1
-            }],
-            metadata={"user_id": str(user_id), "plan": "pay", "quota": quantity},
-            success_url=success_url,
-            cancel_url=cancel_url
-        )
-        return session.url
-    except Exception as e:
-        logger.error("Errore creazione sessione Pay Stripe: %s", e)
-        return None
 
 # =========================
-# Gestione webhook Stripe
+# Webhook Stripe
 # =========================
 def handle_stripe_webhook(payload, sig_header):
     """
-    Gestisce webhook Stripe.
-    Imposta VIP o aumenta quota Pay a seconda del metadata.
+    Gestisce i webhook di Stripe.
+    Aggiorna DB utenti in base al piano acquistato.
     """
     try:
         event = stripe.Webhook.construct_event(
@@ -88,30 +76,35 @@ def handle_stripe_webhook(payload, sig_header):
         logger.error("Errore generico webhook Stripe: %s", e)
         return False
 
+    # --- Gestione evento pagamento completato ---
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
-        user_id = session.get('metadata', {}).get('user_id')
-        plan = session.get('metadata', {}).get('plan')
+        metadata = session.get('metadata', {})
+        user_id = int(metadata.get('user_id', 0))
+        plan_type = metadata.get('plan_type')
 
-        if not user_id or not plan:
-            logger.warning("Checkout completato senza user_id o plan nel metadata!")
+        if not user_id or not plan_type:
+            logger.warning("Checkout completato senza user_id o plan_type in metadata!")
             return False
 
         try:
-            user_id = int(user_id)
-            if plan == "vip":
-                set_user_plan(user_id, "vip")
-                logger.info("Utente %s impostato VIP via Stripe", user_id)
-            elif plan == "pay":
-                quota = int(session.get('metadata', {}).get('quota', 10))
-                decrement_ticket_quota(user_id, -quota)  # incremento quota
-                set_user_plan(user_id, "pay")
-                logger.info("Utente %s acquistato pacchetto %s schedine", user_id, quota)
+            if plan_type == "vip":
+                # Aggiorna utente VIP
+                set_user_plan(user_id, "vip", quota=0)
+                logger.info("Utente %s aggiornato a VIP", user_id)
+            elif plan_type == "pay_10":
+                # Pacchetto 10 schedine: aggiungi quota
+                # recuperiamo l'utente per sommare la quota
+                from db import get_user
+                user = get_user(user_id)
+                new_quota = (user.get("ticket_quota", 0) + 10) if user else 10
+                set_user_plan(user_id, "pay", quota=new_quota)
+                logger.info("Utente %s aggiornato con 10 schedine pay", user_id)
             else:
-                logger.warning("Plan non riconosciuto: %s", plan)
+                logger.warning("Tipo di piano Stripe non gestito: %s", plan_type)
                 return False
         except Exception as e:
-            logger.error("Errore aggiornamento utente %s via Stripe: %s", user_id, e)
+            logger.error("Errore aggiornamento DB per user %s: %s", user_id, e)
             return False
 
     return True
