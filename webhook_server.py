@@ -33,13 +33,17 @@ asyncio.get_event_loop().run_until_complete(application.initialize())
 last_message = {}  # user_id -> message_id
 
 async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
-    """Invia un messaggio eliminando il precedente dell'utente."""
+    """Invia un messaggio eliminando il precedente dell'utente in background."""
+    # Elimina il vecchio messaggio senza bloccare
     if user_id in last_message:
         try:
-            await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-        except:
-            pass  # ignora errori se messaggio già cancellato
+            asyncio.create_task(
+                application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
+            )
+        except Exception as e:
+            logger.warning(f"Errore eliminando messaggio precedente: {e}")
 
+    # Invia il nuovo messaggio
     msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
     last_message[user_id] = msg.message_id
     return msg
@@ -52,7 +56,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if has_started(user_id):
-        return  # se ha già cliccato start, non fa nulla
+        return  # ha già cliccato start, non fare nulla
 
     add_user(user_id)
 
@@ -113,10 +117,7 @@ def webhook():
     """Riceve update da Telegram e li processa thread-safe."""
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
-
-    loop = asyncio.get_event_loop()
-    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
-    
+    asyncio.create_task(application.process_update(update))
     return "ok"
 
 # -------------------------------
