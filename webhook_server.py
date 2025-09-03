@@ -1,16 +1,24 @@
-from flask import Flask, request, jsonify
 import os
-import telebot
 import logging
-from db import init_db, add_user, get_all_users, get_user_tickets, set_vip, is_vip_user
-from bot_logic import send_daily_to_user
-from payments import handle_stripe_webhook
+from flask import Flask, request, jsonify
+import telebot
 
-# --- Config logging ---
+from db import (
+    init_db, add_user, get_all_users, get_user, set_user_plan,
+    set_user_categories, get_user_tickets, decrement_ticket_quota
+)
+from bot_logic import send_daily_to_user, generate_daily_tickets_for_user
+from payments import handle_stripe_webhook  # già implementato per VIP/Pay
+
+# =========================
+# Logging
+# =========================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Variabili d'ambiente ---
+# =========================
+# Variabili d'ambiente
+# =========================
 TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
@@ -23,6 +31,28 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # =========================
+# Menu inline
+# =========================
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+def main_menu():
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("📊 Scegli campionato", callback_data="choose_league"),
+        InlineKeyboardButton("🎟️ I miei ticket", callback_data="my_tickets"),
+        InlineKeyboardButton("💎 Diventa VIP", callback_data="upgrade_vip"),
+        InlineKeyboardButton("💰 Acquista pacchetto", callback_data="buy_pay")
+    )
+    return markup
+
+def leagues_menu():
+    markup = InlineKeyboardMarkup()
+    leagues = ["Premier League", "Serie A", "LaLiga", "Bundesliga", "Ligue 1"]
+    for l in leagues:
+        markup.add(InlineKeyboardButton(l, callback_data=f"league_{l}"))
+    return markup
+
+# =========================
 # Handlers Telegram
 # =========================
 @bot.message_handler(commands=["start"])
@@ -30,40 +60,53 @@ def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     add_user(user_id, username)
-    bot.send_message(user_id, "Benvenuto! Riceverai i pronostici ogni giorno!")
+    bot.send_message(user_id,
+                     "Benvenuto! Usa il menu per gestire il tuo piano e le schedine.",
+                     reply_markup=main_menu())
 
-@bot.message_handler(commands=["list_users"])
-def list_users_command(message):
-    user_ids = get_all_users()
-    bot.send_message(message.chat.id, f"Utenti registrati:\n{user_ids}")
+@bot.callback_query_handler(func=lambda c: True)
+def callback_handler(call):
+    user_id = call.from_user.id
+    data = call.data
 
-@bot.message_handler(commands=["myticket"])
-def myticket(message):
-    user_id = message.from_user.id
-    tickets = get_user_tickets(user_id)
-    
-    if not tickets:
-        bot.send_message(user_id, "Non hai ancora ticket registrati.")
-        return
-
-    response = "📄 I tuoi ticket:\n\n"
-    for t in tickets[-5:]:  # mostra solo gli ultimi 5
-        preds = "\n".join(t['predictions'])
-        created = t['created_at']
-        response += f"📅 {created}:\n{preds}\n\n"
-    
-    bot.send_message(user_id, response)
-
-@bot.message_handler(commands=["upgrade"])
-def upgrade(message):
-    user_id = message.from_user.id
-    if is_vip_user(user_id):
-        bot.send_message(user_id, "Sei già VIP!")
-        return
-
-    # Per ora VIP test, in futuro integra Stripe
-    set_vip(user_id, 1)
-    bot.send_message(user_id, "🎉 Sei diventato VIP! Ora riceverai pronostici premium.")
+    if data == "choose_league":
+        bot.send_message(user_id, "Scegli il tuo campionato preferito:", reply_markup=leagues_menu())
+    elif data.startswith("league_"):
+        league = data.split("_", 1)[1]
+        user = get_user(user_id)
+        categories = user.get("categories", [])
+        if league not in categories:
+            categories.append(league)
+        set_user_categories(user_id, categories)
+        bot.send_message(user_id, f"✅ Aggiunto {league} ai tuoi campionati preferiti.", reply_markup=main_menu())
+    elif data == "my_tickets":
+        tickets = get_user_tickets(user_id, date_filter=None)
+        if not tickets:
+            tickets = generate_daily_tickets_for_user(user_id)
+        if not tickets:
+            bot.send_message(user_id, "⚠️ Nessuna schedina disponibile.")
+        else:
+            for idx, t in enumerate(tickets[:5], 1):
+                txt = f"📋 Schedina {idx} ({t.get('category','N/A')}):\n"
+                txt += "\n".join([f"{i+1}. {p}" for i,p in enumerate(t.get("predictions",[]))])
+                bot.send_message(user_id, txt)
+    elif data == "upgrade_vip":
+        user = get_user(user_id)
+        if user.get("plan") == "vip":
+            bot.send_message(user_id, "Sei già VIP!", reply_markup=main_menu())
+        else:
+            # Qui potresti integrare Stripe VIP
+            set_user_plan(user_id, "vip")
+            bot.send_message(user_id, "🎉 Sei diventato VIP!", reply_markup=main_menu())
+    elif data == "buy_pay":
+        user = get_user(user_id)
+        if user.get("plan") == "pay" and user.get("ticket_quota",0) > 0:
+            bot.send_message(user_id, f"Hai ancora {user['ticket_quota']} ticket disponibili.", reply_markup=main_menu())
+        else:
+            # Qui l'integrazione Stripe per acquistare pacchetto 10 ticket
+            bot.send_message(user_id, "💰 Pagamento pacchetto da 2€ (da integrare Stripe).", reply_markup=main_menu())
+    else:
+        bot.send_message(user_id, "⚠️ Comando non riconosciuto.", reply_markup=main_menu())
 
 # =========================
 # Webhook Telegram
@@ -72,7 +115,6 @@ def upgrade(message):
 def telegram_webhook():
     try:
         json_str = request.get_data(as_text=True)
-        logger.info("📩 Update ricevuto da Telegram: %s", json_str)
         update = telebot.types.Update.de_json(json_str)
         bot.process_new_updates([update])
     except Exception as e:
@@ -81,7 +123,21 @@ def telegram_webhook():
     return jsonify({"status": "ok"}), 200
 
 # =========================
-# Endpoint admin
+# Webhook Stripe
+# =========================
+@app.route("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get("Stripe-Signature")
+    try:
+        success = handle_stripe_webhook(payload, sig_header)
+    except Exception as e:
+        logger.error("Errore webhook Stripe: %s", e)
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"status": "ok"}), 200 if success else 400
+
+# =========================
+# Admin endpoint
 # =========================
 @app.route("/admin/send_today", methods=["POST"])
 def send_today():
@@ -97,33 +153,11 @@ def send_today():
     return jsonify({"status": "invio avviato"}), 200
 
 # =========================
-# Webhook Stripe
-# =========================
-@app.route("/stripe/webhook", methods=["POST"])
-def stripe_webhook():
-    payload = request.data
-    sig_header = request.headers.get("Stripe-Signature")
-    try:
-        success = handle_stripe_webhook(payload, sig_header)
-    except Exception as e:
-        logger.error("Errore webhook Stripe: %s", e)
-        return jsonify({"error": str(e)}), 400
-
-    return jsonify({"status": "ok"}), 200 if success else 400
-
-# =========================
 # Health check
 # =========================
 @app.route("/healthz")
 def health():
     return jsonify({"status": "ok"}), 200
-
-# =========================
-# Test endpoint
-# =========================
-@app.route("/test")
-def test():
-    return jsonify({"status": "server ok"}), 200
 
 # =========================
 # Main
