@@ -1,0 +1,6 @@
+python-telegram-bot==20.5
+requests
+stripe
+Flask
+SQLAlchemy
+python-dotenv
