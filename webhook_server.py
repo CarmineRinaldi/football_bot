@@ -39,9 +39,9 @@ def main_menu():
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton("📊 Scegli campionato", callback_data="choose_league"),
-        InlineKeyboardButton("🎟️ I miei ticket", callback_data="my_tickets"),
+        InlineKeyboardButton("📋 Le mie schedine", callback_data="my_tickets"),
         InlineKeyboardButton("💎 Diventa VIP", callback_data="upgrade_vip"),
-        InlineKeyboardButton("💰 Acquista pacchetto", callback_data="buy_pay")
+        InlineKeyboardButton("💰 Acquista schedine", callback_data="buy_pay")
     )
     return markup
 
@@ -62,7 +62,7 @@ def start(message):
     add_user(user_id, username)
     bot.send_message(
         user_id,
-        "Benvenuto! Usa il menu per gestire il tuo piano e le schedine.",
+        "⚽ Benvenuto nel bot pronostici! Usa il menu qui sotto per gestire i tuoi campionati e le schedine.",
         reply_markup=main_menu()
     )
 
@@ -72,7 +72,8 @@ def callback_handler(call):
     data = call.data
 
     if data == "choose_league":
-        bot.send_message(user_id, "Scegli il tuo campionato preferito:", reply_markup=leagues_menu())
+        bot.send_message(user_id, "📊 Scegli il tuo campionato preferito:", reply_markup=leagues_menu())
+
     elif data.startswith("league_"):
         league = data.split("_", 1)[1]
         user = get_user(user_id)
@@ -80,31 +81,37 @@ def callback_handler(call):
         if league not in categories:
             categories.append(league)
         set_user_categories(user_id, categories)
-        bot.send_message(user_id, f"✅ Aggiunto {league} ai tuoi campionati preferiti.", reply_markup=main_menu())
+        bot.send_message(user_id, f"✅ Hai aggiunto {league} ai tuoi campionati preferiti.", reply_markup=main_menu())
+
     elif data == "my_tickets":
         tickets = get_user_tickets(user_id)
         if not tickets:
             tickets = generate_daily_tickets_for_user(user_id)
         if not tickets:
-            bot.send_message(user_id, "⚠️ Nessuna schedina disponibile.")
+            bot.send_message(user_id, "⚠️ Nessuna schedina disponibile al momento.")
         else:
             for idx, t in enumerate(tickets[:5], 1):
                 txt = f"📋 Schedina {idx} ({t.get('category','N/A')}):\n"
-                txt += "\n".join([f"{i+1}. {p}" for i,p in enumerate(t.get("predictions",[]))])
+                txt += "\n".join([f"{i+1}. {p}" for i, p in enumerate(t.get('predictions', []))])
                 bot.send_message(user_id, txt)
+
     elif data == "upgrade_vip":
         user = get_user(user_id)
         if user.get("plan") == "vip":
-            bot.send_message(user_id, "Sei già VIP!", reply_markup=main_menu())
+            bot.send_message(user_id, "💎 Sei già un utente VIP!", reply_markup=main_menu())
         else:
+            # Integrazione Stripe abbonamento VIP
             set_user_plan(user_id, "vip")
-            bot.send_message(user_id, "🎉 Sei diventato VIP!", reply_markup=main_menu())
+            bot.send_message(user_id, "🎉 Complimenti! Sei diventato VIP e avrai accesso illimitato ai pronostici.", reply_markup=main_menu())
+
     elif data == "buy_pay":
         user = get_user(user_id)
-        if user.get("plan") == "pay" and user.get("ticket_quota",0) > 0:
-            bot.send_message(user_id, f"Hai ancora {user['ticket_quota']} ticket disponibili.", reply_markup=main_menu())
+        if user.get("plan") == "pay" and user.get("ticket_quota", 0) > 0:
+            bot.send_message(user_id, f"📋 Hai ancora {user['ticket_quota']} schedine disponibili.", reply_markup=main_menu())
         else:
-            bot.send_message(user_id, "💰 Pagamento pacchetto da 2€ (da integrare Stripe).", reply_markup=main_menu())
+            # Integrazione Stripe per pacchetto schedine
+            bot.send_message(user_id, "💰 Acquista un pacchetto da 2€ per ricevere 10 schedine extra (Stripe da integrare).", reply_markup=main_menu())
+
     else:
         bot.send_message(user_id, "⚠️ Comando non riconosciuto.", reply_markup=main_menu())
 
