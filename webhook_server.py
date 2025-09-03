@@ -66,13 +66,18 @@ asyncio.get_event_loop().run_until_complete(application.initialize())
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Riceve gli update da Telegram e li processa."""
+    """Riceve gli update da Telegram e li processa in modo thread-safe."""
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
-    
-    # Processa l'update sul loop già esistente
-    asyncio.ensure_future(application.process_update(update))
-    
+
+    # Processa l'update sul loop dell'applicazione, thread-safe
+    future = asyncio.run_coroutine_threadsafe(application.process_update(update), application.loop)
+
+    try:
+        future.result(timeout=5)  # opzionale: aspetta massimo 5 secondi
+    except Exception as e:
+        logger.exception("Errore processando update")
+
     return "ok"
 
 # -------------------------------
