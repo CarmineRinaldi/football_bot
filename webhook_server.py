@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from config import TG_BOT_TOKEN, WEBHOOK_URL
-from database import add_user, decrement_pronostico, has_started
+from database import add_user, decrement_pronostico, get_user, update_plan
 from football_api import get_pronostico, get_campionati
 from payments import create_checkout_session
 import logging
@@ -23,8 +23,6 @@ app = Flask(__name__)
 # Application Telegram
 # -------------------------------
 application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
-
-# Inizializza bot
 asyncio.get_event_loop().run_until_complete(application.initialize())
 
 # -------------------------------
@@ -33,17 +31,13 @@ asyncio.get_event_loop().run_until_complete(application.initialize())
 last_message = {}  # user_id -> message_id
 
 async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
-    """Invia un messaggio eliminando il precedente dell'utente in background."""
-    # Elimina il vecchio messaggio senza bloccare
+    """Invia un messaggio eliminando il precedente dell'utente."""
     if user_id in last_message:
         try:
-            asyncio.create_task(
-                application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-            )
-        except Exception as e:
-            logger.warning(f"Errore eliminando messaggio precedente: {e}")
+            await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
+        except:
+            pass  # ignora errori se messaggio già cancellato
 
-    # Invia il nuovo messaggio
     msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
     last_message[user_id] = msg.message_id
     return msg
@@ -55,8 +49,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    if has_started(user_id):
-        return  # ha già cliccato start, non fare nulla
+    user = get_user(user_id)
+    if user and user[2] > 0:
+        return  # ha già cliccato start
 
     add_user(user_id)
 
@@ -91,7 +86,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Scelta del campionato ---
     elif data.startswith('camp_'):
         campionato = data.split('_', 1)[1]
-        pronostico = get_pronostico(user_id, campionato)
+        pronostico = get_pronostico(campionato)
         await send_with_delete_previous(user_id, chat_id, f"Pronostico per {campionato}:\n{pronostico}")
 
 # -------------------------------
@@ -114,10 +109,12 @@ application.add_handler(CallbackQueryHandler(button_handler))
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Riceve update da Telegram e li processa thread-safe."""
+    """Riceve update da Telegram e li processa."""
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
-    asyncio.create_task(application.process_update(update))
+    
+    # Usa asyncio.run per evitare errori di loop
+    asyncio.run(application.process_update(update))
     return "ok"
 
 # -------------------------------
