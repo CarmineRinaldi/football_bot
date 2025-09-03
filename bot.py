@@ -5,21 +5,17 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from db import (
-    init_db, add_user, get_all_users, get_user, set_vip, is_vip_user,
-    set_plan, set_user_categories, decrement_ticket_quota
+    init_db, add_user, get_all_users, get_user, set_plan,
+    set_user_categories, is_vip_user, get_user_tickets
 )
-from bot_logic import send_daily_to_user, generate_daily_tickets_for_user
+from bot_logic import send_daily_to_user
 from payments import handle_stripe_webhook
 
-# =========================
-# Config logging
-# =========================
+# --- Logging ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# =========================
-# Variabili ambiente
-# =========================
+# --- Variabili d'ambiente ---
 TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
@@ -32,35 +28,29 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # =========================
-# Inline keyboards
+# Campionati disponibili
 # =========================
-def main_menu_keyboard():
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("📄 Le mie schedine", callback_data="menu_tickets"),
-        InlineKeyboardButton("⚡ Ricevi oggi", callback_data="menu_send_today")
-    )
-    kb.add(InlineKeyboardButton("🏆 Scegli campionati", callback_data="menu_categories"))
-    kb.add(InlineKeyboardButton("💎 Upgrade piano", callback_data="menu_upgrade"))
-    return kb
+LEAGUES = ["Premier League", "Serie A", "LaLiga", "Bundesliga", "Ligue 1"]
 
-def categories_keyboard(user_categories):
-    kb = InlineKeyboardMarkup()
-    leagues = ["Premier League", "Serie A", "LaLiga", "Bundesliga", "Ligue 1"]
-    for league in leagues:
-        label = f"✅ {league}" if league in user_categories else league
-        kb.add(InlineKeyboardButton(label, callback_data=f"cat_{league}"))
-    kb.add(InlineKeyboardButton("🔙 Menu principale", callback_data="menu_main"))
-    return kb
-
-def upgrade_keyboard():
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("💎 VIP Gratis (test)", callback_data="plan_vip"),
-        InlineKeyboardButton("💰 Pay 2€ → 10 schedine", callback_data="plan_pay")
+# =========================
+# Funzioni menu inline
+# =========================
+def main_menu_keyboard(user_id):
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("🏆 Scegli campionati", callback_data=f"menu_leagues:{user_id}"),
+        InlineKeyboardButton("💎 Upgrade VIP", callback_data=f"upgrade_vip:{user_id}"),
+        InlineKeyboardButton("💰 Acquista 10 schedine", callback_data=f"upgrade_pay:{user_id}"),
+        InlineKeyboardButton("📄 I miei ticket", callback_data=f"my_tickets:{user_id}")
     )
-    kb.add(InlineKeyboardButton("🔙 Menu principale", callback_data="menu_main"))
-    return kb
+    return markup
+
+def leagues_keyboard(user_id):
+    markup = InlineKeyboardMarkup(row_width=2)
+    for league in LEAGUES:
+        markup.add(InlineKeyboardButton(league, callback_data=f"set_league:{user_id}:{league}"))
+    markup.add(InlineKeyboardButton("🔙 Indietro", callback_data=f"back_menu:{user_id}"))
+    return markup
 
 # =========================
 # Handlers Telegram
@@ -72,86 +62,66 @@ def start(message):
     add_user(user_id, username)
     bot.send_message(
         user_id,
-        "Benvenuto! Usa il menu per gestire le tue schedine e scegliere il tuo piano.",
-        reply_markup=main_menu_keyboard()
+        "Benvenuto! Seleziona un'opzione dal menu:",
+        reply_markup=main_menu_keyboard(user_id)
     )
 
 @bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
+def handle_callback(call):
+    data = call.data
     user_id = call.from_user.id
-    user = get_user(user_id)
-    if not user:
-        bot.send_message(user_id, "Errore: utente non trovato.")
-        return
 
-    # ------------------------
-    # Menu principale
-    # ------------------------
-    if call.data == "menu_main":
+    # ---- Menu principale ----
+    if data.startswith("menu_leagues"):
         bot.edit_message_text(
-            "Menu principale:",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=main_menu_keyboard()
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text="Seleziona i campionati che ti interessano:",
+            reply_markup=leagues_keyboard(user_id)
         )
 
-    elif call.data == "menu_tickets":
-        tickets = get_user_tickets(user_id)
-        if not tickets:
-            text = "Non hai ancora schedine."
-        else:
-            text = "📄 Le tue ultime schedine:\n\n"
-            for t in tickets[-5:]:
-                lines = [f"📅 {t['created_at']} ({t.get('category', 'N/A')})"]
-                lines += [f"{i+1}. {p}" for i, p in enumerate(t['predictions'])]
-                text += "\n".join(lines) + "\n\n"
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
-                              reply_markup=main_menu_keyboard())
+    elif data.startswith("set_league"):
+        _, uid, league = data.split(":", 2)
+        uid = int(uid)
+        user = get_user(uid)
+        cats = user.get("categories", [])
+        if league not in cats:
+            cats.append(league)
+            set_user_categories(uid, cats)
+        bot.answer_callback_query(call.id, f"{league} aggiunto!")
+    
+    elif data.startswith("back_menu"):
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text="Menu principale:",
+            reply_markup=main_menu_keyboard(user_id)
+        )
 
-    elif call.data == "menu_send_today":
-        tickets = generate_daily_tickets_for_user(user_id)
-        send_daily_to_user(bot, user_id)
-        bot.answer_callback_query(call.id, "Schedine inviate!")
-        bot.edit_message_text("Schedine inviate oggi!", call.message.chat.id, call.message.message_id,
-                              reply_markup=main_menu_keyboard())
-
-    elif call.data == "menu_categories":
-        kb = categories_keyboard(user.get("categories", []))
-        bot.edit_message_text("Seleziona i campionati preferiti:", call.message.chat.id,
-                              call.message.message_id, reply_markup=kb)
-
-    elif call.data.startswith("cat_"):
-        league = call.data[4:]
-        categories = user.get("categories", [])
-        if league in categories:
-            categories.remove(league)
-        else:
-            categories.append(league)
-        set_user_categories(user_id, categories)
-        kb = categories_keyboard(categories)
-        bot.edit_message_text("Aggiornato! Seleziona i campionati preferiti:", call.message.chat.id,
-                              call.message.message_id, reply_markup=kb)
-
-    elif call.data == "menu_upgrade":
-        kb = upgrade_keyboard()
-        bot.edit_message_text("Scegli il piano:", call.message.chat.id, call.message.message_id,
-                              reply_markup=kb)
-
-    elif call.data == "plan_vip":
+    elif data.startswith("upgrade_vip"):
         if is_vip_user(user_id):
             bot.answer_callback_query(call.id, "Sei già VIP!")
-            return
-        set_vip(user_id, 1)
-        bot.edit_message_text("🎉 Sei diventato VIP! Ora riceverai pronostici premium.",
-                              call.message.chat.id, call.message.message_id,
-                              reply_markup=main_menu_keyboard())
+        else:
+            set_plan(user_id, "vip")
+            bot.answer_callback_query(call.id, "🎉 Sei diventato VIP!")
+            bot.send_message(user_id, "Ora riceverai pronostici premium!")
 
-    elif call.data == "plan_pay":
-        # Imposta quota Pay per 10 schedine
+    elif data.startswith("upgrade_pay"):
         set_plan(user_id, "pay", quota=10)
-        bot.edit_message_text("💰 Piano Pay attivato! Hai 10 schedine disponibili.",
-                              call.message.chat.id, call.message.message_id,
-                              reply_markup=main_menu_keyboard())
+        bot.answer_callback_query(call.id, "💰 Hai acquistato 10 schedine!")
+        bot.send_message(user_id, "Puoi ora ricevere fino a 10 schedine speciali.")
+
+    elif data.startswith("my_tickets"):
+        tickets = get_user_tickets(user_id)
+        if not tickets:
+            bot.answer_callback_query(call.id, "Non hai ancora ticket.")
+            return
+        msg = "📄 I tuoi ticket:\n\n"
+        for t in tickets[-5:]:
+            preds = "\n".join(t['predictions'])
+            created = t['created_at']
+            msg += f"📅 {created} ({t.get('category','N/A')}):\n{preds}\n\n"
+        bot.send_message(user_id, msg)
 
 # =========================
 # Webhook Telegram
@@ -160,6 +130,7 @@ def callback_handler(call):
 def telegram_webhook():
     try:
         json_str = request.get_data(as_text=True)
+        logger.info("📩 Update ricevuto da Telegram")
         update = telebot.types.Update.de_json(json_str)
         bot.process_new_updates([update])
     except Exception as e:
@@ -168,7 +139,7 @@ def telegram_webhook():
     return jsonify({"status": "ok"}), 200
 
 # =========================
-# Endpoint admin
+# Admin endpoint
 # =========================
 @app.route("/admin/send_today", methods=["POST"])
 def send_today():
@@ -184,7 +155,7 @@ def send_today():
     return jsonify({"status": "invio avviato"}), 200
 
 # =========================
-# Webhook Stripe
+# Stripe webhook
 # =========================
 @app.route("/stripe/webhook", methods=["POST"])
 def stripe_webhook():
