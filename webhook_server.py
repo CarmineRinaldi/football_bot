@@ -1,170 +1,126 @@
-import os
-import logging
 from flask import Flask, request, jsonify
+import os
 import telebot
-from datetime import date
+import logging
+import requests
+from db import init_db, add_user, get_all_users
+from bot_logic import send_daily_to_user
+from payments import handle_stripe_webhook
 
-# --- moduli locali ---
-from db import init_db, add_user, get_all_users, is_vip_user, get_user_tickets
-from bot_logic import send_daily_to_user, generate_daily_tickets_for_user
-
-# =========================
-# Config & oggetti globali
-# =========================
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+# --- Config logging ---
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- Variabili d'ambiente ---
 TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "changeme-super-long")
-TG_SECRET = os.environ.get("TG_WEBHOOK_SECRET")
+ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
+API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY")  # Inserisci qui la tua chiave API
+API_FOOTBALL_URL = "https://v3.football.api-sports.io"
 
-if not TOKEN or not WEBHOOK_URL:
-    logger.error("🚨 TG_BOT_TOKEN o WEBHOOK_URL mancanti!")
-    raise RuntimeError("Variabili obbligatorie mancanti")
+if not TOKEN or not WEBHOOK_URL or not API_FOOTBALL_KEY:
+    logger.error("Variabili TG_BOT_TOKEN, WEBHOOK_URL o API_FOOTBALL_KEY mancanti!")
+    exit(1)
 
-bot = telebot.TeleBot(TOKEN, threaded=False)
+bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# =========================
-# Inizializza DB
-# =========================
-try:
-    init_db()
-    logger.info("DB inizializzato correttamente.")
-except Exception as e:
-    logger.exception("Errore inizializzazione DB: %s", e)
+# --- Funzione per dati Free ---
+def get_free_data():
+    headers = {
+        "x-apisports-key": API_FOOTBALL_KEY
+    }
+    response = requests.get(f"{API_FOOTBALL_URL}/fixtures?live=all", headers=headers)
+    if response.status_code == 200:
+        data = response.json()
+        if data.get("response"):
+            fixtures = data["response"]
+            messages = []
+            for f in fixtures[:5]:  # Primi 5 risultati
+                home = f["fixture"]["home"]["name"]
+                away = f["fixture"]["away"]["name"]
+                score = f["score"]["fulltime"]
+                messages.append(f"{home} vs {away} → {score['home']}:{score['away']}")
+            return "\n".join(messages)
+        return "Nessuna partita live al momento."
+    else:
+        return f"Errore API: {response.status_code}"
 
-# =========================
-# Health & index
-# =========================
-@app.get("/")
-def index():
-    return jsonify({"service": "football-bot", "status": "ok"}), 200
+# --- Handlers Telegram ---
+@bot.message_handler(commands=["start"])
+def start(message):
+    user_id = message.from_user.id
+    username = message.from_user.username or ""
+    add_user(user_id, username)
+    bot.send_message(user_id, "Benvenuto! Riceverai i pronostici ogni giorno!")
 
-@app.get("/healthz")
-def health():
-    return jsonify({"status": "ok"}), 200
+@bot.message_handler(commands=["list_users"])
+def list_users_command(message):
+    user_ids = get_all_users()
+    bot.send_message(message.chat.id, f"Utenti registrati:\n{user_ids}")
 
-# =========================
-# Webhook Telegram
-# =========================
-@app.route("/telegram", methods=["POST", "GET"])
+@bot.message_handler(commands=["free"])
+def free_command(message):
+    try:
+        data = get_free_data()
+        bot.send_message(message.chat.id, data)
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Errore nel recupero dati: {e}")
+
+# --- Webhook Telegram ---
+@app.route("/telegram", methods=["POST"])
 def telegram_webhook():
-    if request.method == "GET":
-        return jsonify({"status": "ok"}), 200
-    if TG_SECRET:
-        secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-        if secret_header != TG_SECRET:
-            logger.warning("Tentativo webhook con secret errato.")
-            return jsonify({"error": "forbidden"}), 403
     try:
         json_str = request.get_data(as_text=True)
         logger.info("📩 Update ricevuto da Telegram: %s", json_str)
         update = telebot.types.Update.de_json(json_str)
         bot.process_new_updates([update])
-        return jsonify({"status": "ok"}), 200
     except Exception as e:
-        logger.exception("Errore nel processamento dell'update Telegram: %s", e)
+        logger.error("Errore webhook Telegram: %s", e)
         return jsonify({"error": str(e)}), 400
+    return jsonify({"status": "ok"}), 200
 
-# =========================
-# Handlers Telegram
-# =========================
-@bot.message_handler(commands=["start"])
-def start(message):
-    try:
-        user_id = message.from_user.id
-        username = (message.from_user.username or "").strip()
-        add_user(user_id, username)
-
-        keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.row("/mytickets", "/upgrade")
-        keyboard.row("Aiuto")
-
-        bot.send_message(
-            user_id,
-            "Benvenuto! Usa i pulsanti qui sotto per navigare tra i comandi:",
-            reply_markup=keyboard
-        )
-        logger.info("Registrato utente %s (@%s)", user_id, username)
-    except Exception as e:
-        logger.exception("Errore handler /start: %s", e)
-
-@bot.message_handler(commands=["mytickets"])
-def mytickets(message):
-    try:
-        user_id = message.from_user.id
-        vip = is_vip_user(user_id)
-        today = str(date.today())
-
-        # Genera schedine se non ci sono
-        generate_daily_tickets_for_user(user_id, vip)
-        tickets = get_user_tickets(user_id, today)
-
-        if not tickets:
-            bot.send_message(user_id, "Non ci sono schedine disponibili oggi.")
-            return
-
-        for idx, t in enumerate(tickets, 1):
-            # Estrazione sicura dei pronostici
-            preds = []
-            if isinstance(t, dict):
-                if "predictions" in t and isinstance(t["predictions"], list):
-                    preds = t["predictions"]
-                elif "data" in t and isinstance(t["data"], dict):
-                    preds = t["data"].get("predictions", [])
-            if not isinstance(preds, list):
-                preds = []
-
-            if not preds:
-                continue
-
-            if not vip:
-                preds = preds[:3]  # Free → solo 3 pronostici
-
-            msg = f"🎟️ Schedina {idx}:\n" + "\n".join(preds)
-            bot.send_message(user_id, msg)
-
-    except Exception as e:
-        logger.exception("Errore handler /mytickets: %s", e)
-        bot.send_message(message.chat.id, "Errore nel recupero schedine.")
-
-@bot.message_handler(commands=["upgrade"])
-def upgrade(message):
-    try:
-        user_id = message.from_user.id
-        bot.send_message(
-            user_id,
-            "🔥 Vuoi diventare VIP e sbloccare tutte le schedine e pronostici?\n"
-            "Visita questo link per il pagamento e upgrade: [INSERISCI LINK STRIPE QUI]"
-        )
-    except Exception as e:
-        logger.exception("Errore handler /upgrade: %s", e)
-        bot.send_message(message.chat.id, "Errore nel processo di upgrade.")
-
-@bot.message_handler(func=lambda m: True)
-def echo(message):
-    try:
-        logger.info("Msg da %s: %s", message.chat.id, message.text)
-        bot.send_message(message.chat.id, f"Hai scritto: {message.text}")
-    except Exception as e:
-        logger.exception("Errore echo: %s", e)
-
-# =========================
-# Admin endpoints
-# =========================
-def _is_admin(req) -> bool:
-    return req.args.get("token") == ADMIN_TOKEN
-
-@app.post("/admin/send_today")
+# --- Endpoint admin ---
+@app.route("/admin/send_today", methods=["POST"])
 def send_today():
-    if not _is_admin(request):
+    token = request.args.get("token")
+    if token != ADMIN_TOKEN:
         return jsonify({"error": "Forbidden"}), 403
     try:
         for uid in get_all_users():
             send_daily_to_user(bot, uid)
-        return jsonify({"status": "invio avviato"}), 200
     except Exception as e:
-        logger.exception("Errore invio pronostici: %s", e)
-        return jsonify({"error": "internal"}), 500
+        logger.error("Errore invio pronostici: %s", e)
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "invio avviato"}), 200
+
+# --- Webhook Stripe ---
+@app.route("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get("Stripe-Signature")
+    try:
+        success = handle_stripe_webhook(payload, sig_header)
+    except Exception as e:
+        logger.error("Errore webhook Stripe: %s", e)
+        return jsonify({"error": str(e)}), 400
+
+    return jsonify({"status": "ok"}), 200 if success else 400
+
+# --- Health check ---
+@app.route("/healthz")
+def health():
+    return jsonify({"status": "ok"}), 200
+
+# --- Test endpoint ---
+@app.route("/test")
+def test():
+    return jsonify({"status": "server ok"}), 200
+
+# --- Main ---
+if __name__ == "__main__":
+    init_db()
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{WEBHOOK_URL}/telegram")
+    logger.info("Bot webhook impostato su %s/telegram", WEBHOOK_URL)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
