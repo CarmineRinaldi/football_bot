@@ -46,6 +46,11 @@ STRIPE_ENDPOINT_SECRET = os.environ.get("STRIPE_ENDPOINT_SECRET") or read_secret
 API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY") or read_secret_file("API_FOOTBALL_KEY")
 
 # =========================
+# Database su percorso scrivibile Render
+# =========================
+DB_FILE = os.environ.get("DB_FILE", "/tmp/users.db")  # percorso sicuro su Render
+
+# =========================
 # Debug variabili
 # =========================
 logger.info("Variabili d'ambiente lette:")
@@ -55,6 +60,7 @@ logger.info("ADMIN_HTTP_TOKEN: %s", ADMIN_TOKEN[:6] + "..." if ADMIN_TOKEN else 
 logger.info("STRIPE_SECRET_KEY: %s", "OK" if STRIPE_SECRET_KEY else "MANCANTE")
 logger.info("STRIPE_ENDPOINT_SECRET: %s", "OK" if STRIPE_ENDPOINT_SECRET else "MANCANTE")
 logger.info("API_FOOTBALL_KEY: %s", "OK" if API_FOOTBALL_KEY else "MANCANTE")
+logger.info("DB_FILE: %s", DB_FILE)
 
 if not TOKEN or not WEBHOOK_URL:
     logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti! Verifica Env Vars o Secret Files.")
@@ -210,14 +216,14 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 # =========================
-# Inizializzazione DB + Webhook
+# Inizializzazione DB + Webhook + Flask
 # =========================
-init_db()
-
-# Imposta il webhook automaticamente all'avvio
-bot.remove_webhook()
-bot.set_webhook(url=f"{WEBHOOK_URL}/telegram")
-logger.info("Webhook impostato su %s/telegram", WEBHOOK_URL)
-
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    init_db()
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{WEBHOOK_URL}/telegram")
+    logger.info("Webhook impostato su %s/telegram", WEBHOOK_URL)
+
+    # Porta Render
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
