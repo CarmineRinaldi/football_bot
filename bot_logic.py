@@ -1,11 +1,11 @@
-import os
 import requests
+import os
 import random
 import logging
 import time
 from datetime import date
 
-from db import is_vip_user, get_user, add_ticket, get_user_tickets, mark_ticket_used
+from db import is_vip_user, add_ticket, get_user_tickets, get_user, decrement_ticket_quota
 
 logger = logging.getLogger(__name__)
 
@@ -13,36 +13,24 @@ API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY")
 RAPIDAPI_HOST = "api-football-v1.p.rapidapi.com"
 
 # Configurazioni
-NUM_TICKETS_FREE = int(os.getenv("NUM_TICKETS_FREE", "10"))
+NUM_TICKETS_FREE = int(os.getenv("NUM_TICKETS_FREE", "3"))
 NUM_TICKETS_VIP = int(os.getenv("NUM_TICKETS_VIP", "15"))
+NUM_TICKETS_PAY = int(os.getenv("NUM_TICKETS_PAY", "10"))
 PREDICTIONS_PER_TICKET = int(os.getenv("PREDICTIONS_PER_TICKET", "5"))
 
 # ----------------------------------------
-# Categorie principali (campionati)
+# Utils
 # ----------------------------------------
-def get_available_categories():
-    return [
-        "Premier League",
-        "Serie A",
-        "La Liga",
-        "Bundesliga",
-        "Ligue 1",
-        "Champions League",
-        "Europa League"
-    ]
-
-# ----------------------------------------
-# Utils fallback pronostici
-# ----------------------------------------
-def _fake_predictions(n=50):
-    teams = [
-        "Arsenal","Man City","Man Utd","Chelsea","Liverpool","Tottenham",
-        "Leicester","Everton","West Ham","Newcastle","Wolves","Aston Villa",
-        "Brighton","Crystal Palace","Brentford","Bournemouth","Fulham","Nottingham",
-        "Juventus","Inter","Milan","Roma","Napoli","Lazio","Fiorentina","Atalanta",
-        "Barcelona","Real Madrid","Atletico","Sevilla","Valencia",
-        "Bayern","Dortmund","Leverkusen","RB Leipzig"
-    ]
+def _fake_predictions(category, n=50):
+    """Fallback in caso API non disponibile."""
+    teams_by_cat = {
+        "Premier League": ["Arsenal","Man City","Man Utd","Chelsea","Liverpool"],
+        "Serie A": ["Juventus","Milan","Inter","Roma","Napoli"],
+        "LaLiga": ["Real Madrid","Barca","Atletico","Sevilla","Valencia"],
+        "Bundesliga": ["Bayern","Dortmund","Leverkusen","RB Leipzig","Schalke"],
+        "Ligue 1": ["PSG","Marseille","Lyon","Monaco","Rennes"]
+    }
+    teams = teams_by_cat.get(category, sum(teams_by_cat.values(), []))
     preds = []
     for _ in range(n):
         a, b = random.sample(teams, 2)
@@ -53,24 +41,23 @@ def _fake_predictions(n=50):
 # ----------------------------------------
 # API Football
 # ----------------------------------------
-def fetch_matches(category="Premier League"):
-    """Recupera partite da API Football in base alla categoria."""
+def fetch_matches(category):
+    """Recupera partite da API Football secondo categoria."""
     if not API_FOOTBALL_KEY:
         logger.warning("API_FOOTBALL_KEY mancante: uso pronostici fittizi.")
         return []
 
     league_map = {
-        "Premier League": 39,
-        "Serie A": 135,
-        "La Liga": 140,
-        "Bundesliga": 78,
-        "Ligue 1": 61,
-        "Champions League": 2,
-        "Europa League": 3
+        "Premier League": "39",
+        "Serie A": "135",
+        "LaLiga": "140",
+        "Bundesliga": "78",
+        "Ligue 1": "61"
     }
-    league_id = league_map.get(category, 39)
+    league_id = league_map.get(category, "39")
+
     url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
-    params = {"league": str(league_id), "season": "2025"}
+    params = {"league": league_id, "season": "2025"}
     headers = {
         "X-RapidAPI-Key": API_FOOTBALL_KEY,
         "X-RapidAPI-Host": RAPIDAPI_HOST
@@ -85,16 +72,17 @@ def fetch_matches(category="Premier League"):
         return []
 
 # ----------------------------------------
-# Generazione schedina
+# Generazione schedine
 # ----------------------------------------
-def generate_ticket(user_id, category="Premier League", vip_only=False, max_matches=PREDICTIONS_PER_TICKET):
-    matches = fetch_matches(category)
+def generate_ticket(user_id, vip_only=False, category=None):
+    """Crea una schedina casuale per l'utente e categoria."""
+    matches = fetch_matches(category) if category else []
     ticket = []
 
     if not matches:
-        ticket = random.sample(_fake_predictions(100), max_matches)
+        ticket = random.sample(_fake_predictions(category or "Premier League", 100), PREDICTIONS_PER_TICKET)
     else:
-        for match in matches[:max_matches]:
+        for match in matches[:PREDICTIONS_PER_TICKET]:
             try:
                 home = match["teams"]["home"]["name"]
                 away = match["teams"]["away"]["name"]
@@ -104,78 +92,72 @@ def generate_ticket(user_id, category="Premier League", vip_only=False, max_matc
             ticket.append(f"{home} vs {away} → {outcome}")
 
     if not vip_only:
-        ticket = ticket[:3]  # Free users vedono solo 3 pronostici
+        ticket = ticket[:3]
 
-    add_ticket(user_id, ticket, category, vip_only=int(vip_only))
-    return ticket
+    return {"predictions": ticket, "category": category or "Premier League"}
 
-# ----------------------------------------
-# Creazione schedine giornaliere per utente
-# ----------------------------------------
 def generate_daily_tickets_for_user(user_id):
+    """Crea schedine giornaliere secondo piano e categorie."""
     user = get_user(user_id)
-    if not user:
-        logger.warning("Utente %s non trovato.", user_id)
-        return []
+    plan = user.get("plan", "free")
+    categories = user.get("categories", ["Premier League"])
 
-    plan = user["plan"]
-    categories = user["categories"] or get_available_categories()
-    tickets_to_generate = 0
-
+    # Determina numero ticket
     if plan == "vip":
-        tickets_to_generate = NUM_TICKETS_VIP
-    elif plan == "free":
-        tickets_to_generate = NUM_TICKETS_FREE
-    elif plan == "pay_per_ticket":
-        tickets_to_generate = user["ticket_balance"]
-        if tickets_to_generate == 0:
-            logger.info("Utente %s senza ticket disponibili.", user_id)
-            return []
+        n_tickets = NUM_TICKETS_VIP
+        vip_only = True
+    elif plan == "pay":
+        n_tickets = NUM_TICKETS_PAY
+        vip_only = True
+    else:
+        n_tickets = NUM_TICKETS_FREE
+        vip_only = False
 
-    tickets = []
-    for i in range(tickets_to_generate):
+    today = str(date.today())
+    existing = get_user_tickets(user_id, today)
+    if existing:
+        return existing
+
+    # Genera ticket
+    for i in range(n_tickets):
         category = random.choice(categories)
-        vip_flag = plan == "vip"
-        ticket = generate_ticket(user_id, category, vip_only=vip_flag)
-        tickets.append({
-            "category": category,
-            "ticket": ticket,
-            "vip_only": vip_flag
-        })
-        # decrementa saldo per pay-per-ticket
-        if plan == "pay_per_ticket":
-            from db import set_plan
-            set_plan(user_id, "pay_per_ticket", add_tickets=-1)
+        ticket = generate_ticket(user_id, vip_only=vip_only, category=category)
+        add_ticket(user_id, ticket)
+        if plan == "pay":
+            decrement_ticket_quota(user_id, 1)
         time.sleep(0.01)
 
-    return tickets
+    return get_user_tickets(user_id, today)
 
 # ----------------------------------------
-# Invio schedine giornaliere
+# Invio schedine
 # ----------------------------------------
 def send_daily_to_user(bot, user_id):
-    user = get_user(user_id)
-    if not user:
-        logger.warning("Utente %s non trovato.", user_id)
-        return 0
+    """Invia le schedine giornaliere all’utente via Telegram."""
+    tickets = get_user_tickets(user_id, str(date.today()))
+    if not tickets:
+        tickets = generate_daily_tickets_for_user(user_id)
 
-    tickets = generate_daily_tickets_for_user(user_id)
     if not tickets:
         bot.send_message(user_id, "⚠️ Nessuna schedina disponibile oggi.")
         return 0
 
-    sent_count = 0
+    sent = 0
     for idx, t in enumerate(tickets, 1):
-        lines = [f"📋 Schedina {idx} ({t['category']})"]
-        for i, p in enumerate(t["ticket"], 1):
+        preds = t.get("predictions", [])
+        if not preds:
+            continue
+        lines = [f"📋 Schedina {idx} ({t.get('category', 'N/A')})"]
+        for i, p in enumerate(preds, 1):
             lines.append(f"{i}. {p}")
         txt = "\n".join(lines)
         try:
             bot.send_message(user_id, txt)
-            sent_count += 1
+            sent += 1
             time.sleep(0.05)
         except Exception as e:
             logger.error("Errore invio schedina a %s: %s", user_id, e)
+            continue
 
-    logger.info("Inviate %s schedine a utente %s", sent_count, user_id)
-    return sent_count
+    logger.info("Inviate %s schedine a utente %s", sent, user_id)
+    return sent
