@@ -2,30 +2,55 @@ import requests
 import os
 import random
 import logging
-import json
+import time
 from datetime import date
-from db import is_vip_user
-from tickets import create_ticket, get_tickets, delete_old_tickets
+
+from db import is_vip_user, add_ticket, get_user_tickets
 
 logger = logging.getLogger(__name__)
 
 API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY")
-if not API_FOOTBALL_KEY:
-    logger.error("Variabile API_FOOTBALL_KEY non trovata!")
+RAPIDAPI_HOST = "api-football-v1.p.rapidapi.com"
+
+# Configurazioni (modificabili via variabili d’ambiente)
+NUM_TICKETS_FREE = int(os.getenv("NUM_TICKETS_FREE", "10"))
+NUM_TICKETS_VIP = int(os.getenv("NUM_TICKETS_VIP", "15"))
+PREDICTIONS_PER_TICKET = int(os.getenv("PREDICTIONS_PER_TICKET", "5"))
 
 # ----------------------------------------
-# Funzioni principali
+# Utils
 # ----------------------------------------
+def _fake_predictions(n=50):
+    """Fallback in caso API non disponibile."""
+    teams = [
+        "Arsenal","Man City","Man Utd","Chelsea","Liverpool","Tottenham",
+        "Leicester","Everton","West Ham","Newcastle","Wolves","Aston Villa",
+        "Brighton","Crystal Palace","Brentford","Bournemouth","Fulham","Nottingham"
+    ]
+    preds = []
+    for _ in range(n):
+        a, b = random.sample(teams, 2)
+        outcome = random.choice(["1", "X", "2"])
+        preds.append(f"{a} vs {b} → {outcome}")
+    return preds
 
+# ----------------------------------------
+# API Football
+# ----------------------------------------
 def fetch_matches():
-    """Recupera partite da API Football (limitate a Premier League 39 per esempio)."""
-    url = "https://api-football-v1.p.rapidapi.com/v3/fixtures?league=39&season=2025"
+    """Recupera partite da API Football (Premier League come esempio)."""
+    if not API_FOOTBALL_KEY:
+        logger.warning("API_FOOTBALL_KEY mancante: uso pronostici fittizi.")
+        return []
+
+    url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
+    params = {"league": "39", "season": "2025"}
     headers = {
         "X-RapidAPI-Key": API_FOOTBALL_KEY,
-        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+        "X-RapidAPI-Host": RAPIDAPI_HOST
     }
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         return data.get("response", [])
@@ -33,56 +58,85 @@ def fetch_matches():
         logger.error("Errore API-Football: %s", e)
         return []
 
-def generate_ticket(vip_only=0, max_matches=5):
+# ----------------------------------------
+# Generazione schedine
+# ----------------------------------------
+def generate_ticket(vip_only=False, max_matches=PREDICTIONS_PER_TICKET):
     """Crea una schedina casuale."""
     matches = fetch_matches()
-    if not matches:
-        return ["Errore nel recupero delle partite."]
-
     ticket = []
-    for match in matches[:max_matches]:
-        home = match["fixture"]["homeTeam"]["name"]
-        away = match["fixture"]["awayTeam"]["name"]
-        outcome = random.choice(["1", "X", "2"])
-        ticket.append(f"{home} vs {away} → {outcome}")
 
-    # Se è free, mostra solo 3 pronostici a schedina
+    if not matches:
+        # se API vuota, uso fallback
+        ticket = random.sample(_fake_predictions(100), max_matches)
+    else:
+        for match in matches[:max_matches]:
+            try:
+                home = match["teams"]["home"]["name"]
+                away = match["teams"]["away"]["name"]
+            except KeyError:
+                continue
+            outcome = random.choice(["1", "X", "2"])
+            ticket.append(f"{home} vs {away} → {outcome}")
+
+    # Se non è VIP mostro solo 3 pronostici
     if not vip_only:
         ticket = ticket[:3]
 
     return ticket
 
-def generate_daily_tickets_for_user(user_id, is_vip):
-    """Crea schedine giornaliere per un utente e le salva nel DB."""
-    delete_old_tickets()  # pulizia giornaliera
-    tickets_count = 10 if not is_vip else 15  # Free 10 ticket, VIP 15
-    for _ in range(tickets_count):
-        ticket = generate_ticket(vip_only=int(is_vip))
-        create_ticket(user_id, ticket, vip_only=int(is_vip))
+def generate_daily_tickets_for_user(user_id, vip=False):
+    """Crea schedine giornaliere e le salva nel DB (se non esistono già)."""
+    today = str(date.today())
+    existing = get_user_tickets(user_id, today)
+    if existing:
+        logger.debug("Schedine già presenti per utente %s", user_id)
+        return existing
 
-def get_user_daily_tickets(user_id):
-    """Recupera schedine da mostrare all’utente a seconda del piano."""
-    vip = is_vip_user(user_id)
-    tickets = get_tickets(user_id, is_vip=vip)
-    return tickets
+    n_tickets = NUM_TICKETS_VIP if vip else NUM_TICKETS_FREE
+    for i in range(n_tickets):
+        ticket = generate_ticket(vip_only=vip)
+        add_ticket(user_id, {
+            "predictions": ticket,
+            "date": today,
+            "meta": {"index": i, "vip": int(vip)}
+        })
+        time.sleep(0.01)  # piccola pausa per non bloccare SQLite
 
+    return get_user_tickets(user_id, today)
+
+# ----------------------------------------
+# Invio schedine
+# ----------------------------------------
 def send_daily_to_user(bot, user_id):
-    """Invia tutte le schedine giornaliere all’utente via Telegram."""
+    """Invia le schedine giornaliere all’utente via Telegram."""
     vip = is_vip_user(user_id)
-    tickets = get_user_daily_tickets(user_id)
+    today = str(date.today())
+
+    tickets = get_user_tickets(user_id, today)
+    if not tickets:
+        tickets = generate_daily_tickets_for_user(user_id, vip)
 
     if not tickets:
-        # Se non ci sono schedine, le generiamo
-        generate_daily_tickets_for_user(user_id, vip)
-        tickets = get_user_daily_tickets(user_id)
+        bot.send_message(user_id, "⚠️ Nessuna schedina disponibile oggi.")
+        return 0
 
-    msg_lines = []
-    for t in tickets:
-        pronos = t["pronostici"]
-        msg_lines.append(f"🎟️ Schedina #{t['ticket_id']}:\n" + "\n".join(pronos))
+    sent = 0
+    for idx, t in enumerate(tickets, 1):
+        preds = t.get("data", {}).get("predictions") if isinstance(t, dict) else t.get("predictions", [])
+        if not preds:
+            continue
+        lines = [f"📋 Schedina {idx}"]
+        for i, p in enumerate(preds, 1):
+            lines.append(f"{i}. {p}")
+        txt = "\n".join(lines)
+        try:
+            bot.send_message(user_id, txt)
+            sent += 1
+            time.sleep(0.05)
+        except Exception as e:
+            logger.error("Errore invio schedina a %s: %s", user_id, e)
+            continue
 
-    final_msg = "\n\n".join(msg_lines)
-    try:
-        bot.send_message(user_id, f"📊 Pronostici del giorno:\n\n{final_msg}")
-    except Exception as e:
-        logger.error("Errore invio pronostici a %s: %s", user_id, e)
+    logger.info("Inviate %s schedine a utente %s (VIP=%s)", sent, user_id, vip)
+    return sent
