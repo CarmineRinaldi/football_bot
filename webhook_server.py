@@ -1,10 +1,11 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from config import TG_BOT_TOKEN, WEBHOOK_URL
 from database import add_user, decrement_pronostico
 from football_api import get_pronostico
 from payments import create_checkout_session
+import asyncio
 
 # -------------------------------
 # Flask app
@@ -56,7 +57,7 @@ application.add_handler(CallbackQueryHandler(button_handler))
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    application.create_task(application.process_update(update))
+    asyncio.run(application.process_update(update))
     return "ok"
 
 # -------------------------------
@@ -65,6 +66,17 @@ def webhook():
 @app.route("/", methods=["GET"])
 def index():
     return "Bot Telegram attivo!"
+
+# -------------------------------
+# Endpoint per impostare webhook da remoto
+# -------------------------------
+@app.route("/set_webhook", methods=["GET"])
+def set_webhook():
+    success = application.bot.set_webhook(WEBHOOK_URL + "/webhook")
+    if success:
+        return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
+    else:
+        return jsonify({"status": "error", "message": "Errore nell'impostazione del webhook"}), 500
 
 # -------------------------------
 # Avvio locale (solo debug)
