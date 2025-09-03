@@ -5,8 +5,8 @@ from config import TG_BOT_TOKEN, WEBHOOK_URL
 from database import add_user, decrement_pronostico
 from football_api import get_pronostico
 from payments import create_checkout_session
-import asyncio
 import logging
+import asyncio
 
 # -------------------------------
 # Config logging
@@ -58,22 +58,22 @@ application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# 🔧 Inizializza l’application per il webhook
-loop = asyncio.get_event_loop()
-loop.run_until_complete(application.initialize())
+# 🔧 Inizializza bot (solo una volta)
+asyncio.get_event_loop().run_until_complete(application.initialize())
 
 # -------------------------------
 # Webhook endpoint
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        asyncio.run(application.process_update(update))
-        return "ok"
-    except Exception as e:
-        logger.exception("Errore nel processing webhook")
-        return "error", 500
+    """Riceve gli update da Telegram e li processa."""
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
+    
+    # Processa l'update sul loop già esistente
+    asyncio.ensure_future(application.process_update(update))
+    
+    return "ok"
 
 # -------------------------------
 # Endpoint per debug
@@ -92,7 +92,7 @@ def set_webhook():
         return await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
 
     try:
-        success = asyncio.run(setup_webhook())
+        success = asyncio.get_event_loop().run_until_complete(setup_webhook())
     except Exception as e:
         logger.exception("Errore impostando il webhook")
         return jsonify({"status": "error", "message": str(e)}), 500
