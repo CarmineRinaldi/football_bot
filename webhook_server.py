@@ -94,12 +94,28 @@ def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     logger.info("Ricevuto /start da %s (%s)", user_id, username)
-    add_user(user_id, username)
-    bot.send_message(
-        user_id,
-        "⚽ Benvenuto nel bot pronostici! Usa il menu qui sotto per gestire i tuoi campionati e le schedine.",
-        reply_markup=main_menu()
-    )
+    try:
+        add_user(user_id, username)
+        logger.info("Utente %s registrato correttamente", user_id)
+    except Exception as e:
+        logger.error("Errore add_user: %s", e)
+
+    try:
+        bot.send_message(
+            user_id,
+            "⚽ Benvenuto nel bot pronostici! Usa il menu qui sotto per gestire i tuoi campionati e le schedine.",
+            reply_markup=main_menu()
+        )
+        logger.info("Messaggio di benvenuto inviato a %s", user_id)
+    except Exception as e:
+        logger.error("Errore invio messaggio start: %s", e)
+
+
+# Fallback per qualsiasi messaggio
+@bot.message_handler(func=lambda m: True)
+def all_messages(message):
+    logger.info("Messaggio generico ricevuto da %s: %s", message.from_user.id, message.text)
+    bot.send_message(message.chat.id, "📩 Hai scritto: " + message.text)
 
 @bot.callback_query_handler(func=lambda c: True)
 def callback_handler(call):
