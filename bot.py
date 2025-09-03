@@ -1,22 +1,17 @@
+# bot.py
 import os
 import logging
 from flask import Flask, request, jsonify
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-from db import init_db, add_user, get_all_users, get_user_tickets, is_vip_user, set_user_plan, get_user
+from db import init_db, add_user, get_user, set_user_plan, get_all_users, get_user_tickets
 from bot_logic import send_daily_to_user
-from payments import create_vip_checkout_session, create_pay_package_session, handle_stripe_webhook
 
-# =========================
-# Logging
-# =========================
+# --- Config logging ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# =========================
-# Configurazione Bot
-# =========================
+# --- Variabili d'ambiente ---
 TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
@@ -29,25 +24,10 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # =========================
-# Menu categorie
+# Costanti categorie
 # =========================
 CATEGORIES = ["Premier League", "Serie A", "LaLiga", "Bundesliga", "Ligue 1"]
-
-def main_menu_markup():
-    markup = InlineKeyboardMarkup()
-    markup.row_width = 1
-    markup.add(
-        InlineKeyboardButton("📄 I miei ticket", callback_data="myticket"),
-        InlineKeyboardButton("⭐ Diventa VIP", callback_data="upgrade_vip"),
-        InlineKeyboardButton("💰 Pacchetto 10 schedine (2€)", callback_data="buy_pay")
-    )
-    return markup
-
-def categories_markup():
-    markup = InlineKeyboardMarkup()
-    for cat in CATEGORIES:
-        markup.add(InlineKeyboardButton(cat, callback_data=f"category_{cat}"))
-    return markup
+PLANS = ["free", "vip", "pay"]
 
 # =========================
 # Handlers Telegram
@@ -57,57 +37,73 @@ def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     add_user(user_id, username)
-    bot.send_message(
-        user_id,
-        "Benvenuto! Scegli un'opzione dal menu:",
-        reply_markup=main_menu_markup()
-    )
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    buttons = [InlineKeyboardButton(text=cat, callback_data=f"cat_{cat}") for cat in CATEGORIES]
+    keyboard.add(*buttons)
+    bot.send_message(user_id, "Benvenuto! Scegli il campionato di tuo interesse:", reply_markup=keyboard)
 
-# =========================
-# Callback query
-# =========================
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
+def select_category(call):
     user_id = call.from_user.id
-    data = call.data
+    category = call.data.replace("cat_", "")
+    user = get_user(user_id)
+    user_categories = user.get("categories", [])
+    if category not in user_categories:
+        user_categories.append(category)
+    set_user_plan(user_id, user.get("plan", "free"), categories=user_categories)
+    bot.answer_callback_query(call.id, f"Categoria {category} selezionata!")
+    bot.send_message(user_id, f"Hai scelto: {category}\nPuoi continuare a selezionare altre categorie.")
 
-    if data == "myticket":
-        tickets = get_user_tickets(user_id)
-        if not tickets:
-            bot.send_message(user_id, "Non hai ancora ticket.")
-        else:
-            for idx, t in enumerate(tickets[-5:], 1):
-                preds = "\n".join(t["predictions"])
-                bot.send_message(user_id, f"📋 Schedina {idx} ({t.get('category','N/A')}):\n{preds}")
-    elif data == "upgrade_vip":
-        if is_vip_user(user_id):
-            bot.send_message(user_id, "Sei già VIP!")
-        else:
-            url = create_vip_checkout_session(
-                user_id,
-                success_url=os.environ.get("STRIPE_SUCCESS_URL", "https://example.com/success"),
-                cancel_url=os.environ.get("STRIPE_CANCEL_URL", "https://example.com/cancel")
-            )
-            if url:
-                bot.send_message(user_id, f"🔥 Diventa VIP cliccando qui: {url}")
-            else:
-                bot.send_message(user_id, "Errore generazione link VIP, riprova più tardi.")
-    elif data == "buy_pay":
-        url = create_pay_package_session(
-            user_id,
-            success_url=os.environ.get("STRIPE_SUCCESS_URL", "https://example.com/success"),
-            cancel_url=os.environ.get("STRIPE_CANCEL_URL", "https://example.com/cancel")
-        )
-        if url:
-            bot.send_message(user_id, f"💰 Acquista 10 schedine: {url}")
-        else:
-            bot.send_message(user_id, "Errore generazione link pagamento, riprova più tardi.")
-    elif data.startswith("category_"):
-        cat = data.replace("category_", "")
-        bot.send_message(user_id, f"Hai selezionato la categoria: {cat}")
-        # eventuale logica per salvare preferenza utente
-    else:
-        bot.send_message(user_id, "Opzione non riconosciuta.")
+@bot.message_handler(commands=["plan"])
+def show_plan(message):
+    user_id = message.from_user.id
+    user = get_user(user_id)
+    plan = user.get("plan", "free")
+    categories = ", ".join(user.get("categories", []))
+    bot.send_message(user_id, f"Piano attuale: {plan}\nCategorie selezionate: {categories}")
+
+@bot.message_handler(commands=["upgrade"])
+def upgrade(message):
+    user_id = message.from_user.id
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    buttons = [
+        InlineKeyboardButton(text="VIP Mensile", callback_data="plan_vip"),
+        InlineKeyboardButton(text="Pay 10 schedine", callback_data="plan_pay")
+    ]
+    keyboard.add(*buttons)
+    bot.send_message(user_id, "Scegli il piano a pagamento:", reply_markup=keyboard)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plan_"))
+def select_plan(call):
+    user_id = call.from_user.id
+    plan = call.data.replace("plan_", "")
+    if plan not in PLANS:
+        bot.answer_callback_query(call.id, "Piano non valido")
+        return
+
+    if plan == "vip":
+        # Attivazione VIP diretta (per test, poi integra Stripe)
+        set_user_plan(user_id, "vip")
+        bot.answer_callback_query(call.id, "VIP attivato!")
+        bot.send_message(user_id, "🎉 Sei diventato VIP! Ora riceverai pronostici premium.")
+    elif plan == "pay":
+        # Pay 10 schedine (qui dovrai integrare Stripe)
+        set_user_plan(user_id, "pay", tickets_quota=10)
+        bot.answer_callback_query(call.id, "Piano pay attivato!")
+        bot.send_message(user_id, "🎉 Hai acquistato 10 schedine! Riceverai pronostici fino all’esaurimento.")
+
+@bot.message_handler(commands=["mytickets"])
+def mytickets(message):
+    user_id = message.from_user.id
+    tickets = get_user_tickets(user_id)
+    if not tickets:
+        bot.send_message(user_id, "Non hai ancora ticket disponibili.")
+        return
+    response = "📄 I tuoi ticket:\n\n"
+    for t in tickets[-5:]:  # mostra gli ultimi 5
+        preds = "\n".join(t["predictions"])
+        response += f"📅 {t.get('category', 'N/A')}:\n{preds}\n\n"
+    bot.send_message(user_id, response)
 
 # =========================
 # Webhook Telegram
@@ -116,6 +112,7 @@ def callback_handler(call):
 def telegram_webhook():
     try:
         json_str = request.get_data(as_text=True)
+        logger.info("📩 Update ricevuto da Telegram: %s", json_str)
         update = telebot.types.Update.de_json(json_str)
         bot.process_new_updates([update])
     except Exception as e:
@@ -124,17 +121,7 @@ def telegram_webhook():
     return jsonify({"status": "ok"}), 200
 
 # =========================
-# Webhook Stripe
-# =========================
-@app.route("/stripe/webhook", methods=["POST"])
-def stripe_webhook():
-    payload = request.data
-    sig_header = request.headers.get("Stripe-Signature")
-    success = handle_stripe_webhook(payload, sig_header)
-    return jsonify({"status": "ok"}), 200 if success else 400
-
-# =========================
-# Admin send
+# Admin endpoint
 # =========================
 @app.route("/admin/send_today", methods=["POST"])
 def send_today():
