@@ -1,7 +1,7 @@
 import sqlite3
-import logging
 import json
-from datetime import datetime, date
+import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 DB_FILE = "bot.db"
@@ -20,14 +20,14 @@ def init_db():
             id INTEGER PRIMARY KEY,
             username TEXT,
             vip INTEGER DEFAULT 0,
-            plan TEXT DEFAULT 'free',  -- free / vip / pay
-            ticket_quota INTEGER DEFAULT 0,  -- solo per pay
-            categories TEXT DEFAULT '["Premier League"]',  -- JSON lista
+            plan TEXT DEFAULT 'free',       -- free / vip / pay
+            ticket_quota INTEGER DEFAULT 0, -- solo per pay
+            categories TEXT DEFAULT '[]',   -- lista JSON
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
-        # Tabella tickets
+        # Tabella tickets/schedine
         cur.execute("""
         CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +46,7 @@ def init_db():
         raise e
 
 # =========================
-# Gestione utenti
+# Utenti
 # =========================
 def add_user(user_id, username=None):
     try:
@@ -73,7 +73,7 @@ def get_user(user_id):
         return {
             "id": row[0],
             "username": row[1],
-            "vip": bool(row[2]),
+            "vip": row[2],
             "plan": row[3],
             "ticket_quota": row[4],
             "categories": json.loads(row[5])
@@ -95,99 +95,44 @@ def get_all_users():
         return []
 
 def is_vip_user(user_id):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cur = conn.cursor()
-        cur.execute("SELECT vip FROM users WHERE id=?", (user_id,))
-        row = cur.fetchone()
-        conn.close()
-        return bool(row[0]) if row else False
-    except Exception as e:
-        logger.exception("Errore is_vip_user: %s", e)
-        return False
+    user = get_user(user_id)
+    return bool(user.get("vip", 0))
 
-def set_vip(user_id, vip_status=1):
+def set_vip(user_id, vip=1):
     try:
         conn = sqlite3.connect(DB_FILE)
         cur = conn.cursor()
-        cur.execute("UPDATE users SET vip=?, plan='vip' WHERE id=?", (vip_status, user_id))
+        cur.execute("UPDATE users SET vip=? WHERE id=?", (vip, user_id))
         conn.commit()
         conn.close()
-        logger.info("Utente %s aggiornato VIP=%s", user_id, vip_status)
+        logger.info("Utente %s impostato VIP=%s", user_id, vip)
     except Exception as e:
         logger.exception("Errore set_vip: %s", e)
 
 def set_plan(user_id, plan, ticket_quota=0, categories=None):
-    """Aggiorna piano utente con eventuale quota e categorie."""
+    """Imposta piano e opzioni dell’utente"""
     try:
+        categories_json = json.dumps(categories or [])
         conn = sqlite3.connect(DB_FILE)
         cur = conn.cursor()
-        cat_json = json.dumps(categories) if categories else '["Premier League"]'
         cur.execute("""
         UPDATE users SET plan=?, ticket_quota=?, categories=? WHERE id=?
-        """, (plan, ticket_quota, cat_json, user_id))
+        """, (plan, ticket_quota, categories_json, user_id))
         conn.commit()
         conn.close()
-        logger.info("Utente %s aggiornato plan=%s, ticket_quota=%s", user_id, plan, ticket_quota)
+        logger.info("Utente %s aggiornato piano=%s, ticket_quota=%s, categories=%s",
+                    user_id, plan, ticket_quota, categories)
     except Exception as e:
         logger.exception("Errore set_plan: %s", e)
 
 def decrement_ticket_quota(user_id, n=1):
-    """Riduce la quota residua ticket per utente pay."""
+    """Decrementa quota ticket Pay"""
     try:
         conn = sqlite3.connect(DB_FILE)
         cur = conn.cursor()
-        cur.execute("UPDATE users SET ticket_quota = ticket_quota - ? WHERE id=? AND ticket_quota >= ?", (n, user_id, n))
+        cur.execute("UPDATE users SET ticket_quota = ticket_quota - ? WHERE id=? AND ticket_quota>=?", (n, user_id, n))
         conn.commit()
         conn.close()
-        logger.info("Quota ticket ridotta di %s per user %s", n, user_id)
+        logger.info("Decrementata quota ticket Pay per utente %s di %s", user_id, n)
     except Exception as e:
         logger.exception("Errore decrement_ticket_quota: %s", e)
-
-# =========================
-# Gestione tickets
-# =========================
-def add_ticket(user_id, ticket_data):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cur = conn.cursor()
-        cur.execute("INSERT INTO tickets (user_id, data) VALUES (?, ?)", (user_id, json.dumps(ticket_data)))
-        conn.commit()
-        conn.close()
-        logger.info("Ticket aggiunto per utente %s", user_id)
-    except Exception as e:
-        logger.exception("Errore add_ticket: %s", e)
-
-def get_user_tickets(user_id, date_filter=None):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cur = conn.cursor()
-        if date_filter:
-            cur.execute(
-                "SELECT data, created_at FROM tickets WHERE user_id=? AND date(created_at)=? ORDER BY created_at DESC",
-                (user_id, date_filter),
-            )
-        else:
-            cur.execute(
-                "SELECT data, created_at FROM tickets WHERE user_id=? ORDER BY created_at DESC",
-                (user_id,),
-            )
-        rows = cur.fetchall()
-        conn.close()
-
-        tickets = []
-        for row in rows:
-            try:
-                data = json.loads(row[0])
-                preds = data.get("predictions", [])
-            except Exception:
-                preds = []
-            tickets.append({
-                "predictions": preds,
-                "category": data.get("category", "N/A"),
-                "created_at": row[1]
-            })
-        return tickets
-    except Exception as e:
-        logger.exception("Errore get_user_tickets: %s", e)
-        return []
