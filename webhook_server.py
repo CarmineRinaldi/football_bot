@@ -78,10 +78,9 @@ def start(message):
         username = (message.from_user.username or "").strip()
         add_user(user_id, username)
 
-        # Tastiera con comandi principali
         keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.row("/mytickets", "/upgrade")  # stessa riga
-        keyboard.row("Aiuto")  # nuova riga per eventuali altri comandi
+        keyboard.row("/mytickets", "/upgrade")
+        keyboard.row("Aiuto")
 
         bot.send_message(
             user_id,
@@ -108,7 +107,15 @@ def mytickets(message):
             return
 
         for idx, t in enumerate(tickets, 1):
-            preds = t.get("predictions", [])
+            # Estrazione sicura dei pronostici
+            preds = []
+            if isinstance(t, dict):
+                if "predictions" in t and isinstance(t["predictions"], list):
+                    preds = t["predictions"]
+                elif "data" in t and isinstance(t["data"], dict):
+                    preds = t["data"].get("predictions", [])
+            if not isinstance(preds, list):
+                preds = []
 
             if not preds:
                 continue
@@ -161,7 +168,3 @@ def send_today():
     except Exception as e:
         logger.exception("Errore invio pronostici: %s", e)
         return jsonify({"error": "internal"}), 500
-
-# =========================
-# Mantieni set_webhook, delete_webhook, stripe_webhook come prima
-# =========================
