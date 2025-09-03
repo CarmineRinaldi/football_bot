@@ -118,13 +118,33 @@ def add_ticket(user_id, ticket_data):
     except Exception as e:
         logger.exception("Errore add_ticket: %s", e)
 
-def get_user_tickets(user_id):
+def get_user_tickets(user_id, date_filter=None):
+    """
+    Recupera le schedine di un utente.
+    Se date_filter è passato (YYYY-MM-DD), ritorna solo quelle del giorno.
+    """
     try:
         conn = sqlite3.connect(DB_FILE)
         cur = conn.cursor()
-        cur.execute("SELECT data, created_at FROM tickets WHERE user_id=? ORDER BY created_at DESC", (user_id,))
-        tickets = [{"data": json.loads(row[0]), "created_at": row[1]} for row in cur.fetchall()]
+        if date_filter:
+            cur.execute(
+                "SELECT data, created_at FROM tickets WHERE user_id=? AND date(created_at)=? ORDER BY created_at DESC",
+                (user_id, date_filter),
+            )
+        else:
+            cur.execute(
+                "SELECT data, created_at FROM tickets WHERE user_id=? ORDER BY created_at DESC",
+                (user_id,),
+            )
+        rows = cur.fetchall()
         conn.close()
+
+        tickets = []
+        for row in rows:
+            tickets.append({
+                "predictions": json.loads(row[0]),
+                "created_at": row[1]
+            })
         return tickets
     except Exception as e:
         logger.exception("Errore get_user_tickets: %s", e)
