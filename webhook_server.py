@@ -79,7 +79,17 @@ def start(message):
         user_id = message.from_user.id
         username = (message.from_user.username or "").strip()
         add_user(user_id, username)
-        bot.send_message(user_id, "Benvenuto! Riceverai i pronostici ogni giorno!")
+
+        # Tastiera con comandi principali
+        keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.row("/mytickets", "/upgrade")  # stessa riga
+        keyboard.row("Aiuto")  # nuova riga per eventuali altri comandi
+
+        bot.send_message(
+            user_id,
+            "Benvenuto! Usa i pulsanti qui sotto per navigare tra i comandi:",
+            reply_markup=keyboard
+        )
         logger.info("Registrato utente %s (@%s)", user_id, username)
     except Exception as e:
         logger.exception("Errore handler /start: %s", e)
@@ -112,9 +122,11 @@ def mytickets(message):
 def upgrade(message):
     try:
         user_id = message.from_user.id
-        bot.send_message(user_id,
-                         "🔥 Vuoi diventare VIP e sbloccare tutte le schedine e pronostici?\n"
-                         "Visita questo link per il pagamento e upgrade: [INSERISCI LINK STRIPE QUI]")
+        bot.send_message(
+            user_id,
+            "🔥 Vuoi diventare VIP e sbloccare tutte le schedine e pronostici?\n"
+            "Visita questo link per il pagamento e upgrade: [INSERISCI LINK STRIPE QUI]"
+        )
     except Exception as e:
         logger.exception("Errore handler /upgrade: %s", e)
         bot.send_message(message.chat.id, "Errore nel processo di upgrade.")
@@ -145,4 +157,6 @@ def send_today():
         logger.exception("Errore invio pronostici: %s", e)
         return jsonify({"error": "internal"}), 500
 
-# set_webhook, delete_webhook e stripe_webhook mantieni come prima
+# =========================
+# Mantieni set_webhook, delete_webhook, stripe_webhook come prima
+# =========================
