@@ -17,28 +17,48 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # =========================
-# Variabili d'ambiente e Secret Files
+# Funzione lettura secrets
 # =========================
-def read_secret(file_name):
-    """Legge il contenuto di un Secret File, se esiste"""
-    path = f"/run/secrets/{file_name}"
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return f.read().strip()
+def read_secret_file(name: str):
+    """
+    Legge un secret da /run/secrets/<name> (Render).
+    """
+    try:
+        path = f"/run/secrets/{name}"
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                return f.read().strip()
+    except Exception as e:
+        logger.warning("Errore lettura secret file %s: %s", name, e)
     return None
 
-# Prova a leggere dai Secret Files
-TOKEN = read_secret("TG_BOT_TOKEN") or os.environ.get("TG_BOT_TOKEN")
-WEBHOOK_URL = read_secret("WEBHOOK_URL") or os.environ.get("WEBHOOK_URL")
-ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
+# =========================
+# Variabili d'ambiente / secrets
+# =========================
+TOKEN = os.environ.get("TG_BOT_TOKEN") or read_secret_file("TG_BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL") or read_secret_file("WEBHOOK_URL")
+ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN") or "metti_un_token_lungo"
 
+# Stripe
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY") or read_secret_file("STRIPE_SECRET_KEY")
+STRIPE_ENDPOINT_SECRET = os.environ.get("STRIPE_ENDPOINT_SECRET") or read_secret_file("STRIPE_ENDPOINT_SECRET")
+
+# API football
+API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY") or read_secret_file("API_FOOTBALL_KEY")
+
+# =========================
+# Debug variabili
+# =========================
 logger.info("Variabili d'ambiente lette:")
-logger.info("TG_BOT_TOKEN: %s", "PRESENTE" if TOKEN else "MANCANTE")
-logger.info("WEBHOOK_URL: %s", "PRESENTE" if WEBHOOK_URL else "MANCANTE")
-logger.info("ADMIN_HTTP_TOKEN: %s", ADMIN_TOKEN[:6] + "...")
+logger.info("TG_BOT_TOKEN: %s", "OK" if TOKEN else "MANCANTE")
+logger.info("WEBHOOK_URL: %s", "OK" if WEBHOOK_URL else "MANCANTE")
+logger.info("ADMIN_HTTP_TOKEN: %s", ADMIN_TOKEN[:6] + "..." if ADMIN_TOKEN else "MANCANTE")
+logger.info("STRIPE_SECRET_KEY: %s", "OK" if STRIPE_SECRET_KEY else "MANCANTE")
+logger.info("STRIPE_ENDPOINT_SECRET: %s", "OK" if STRIPE_ENDPOINT_SECRET else "MANCANTE")
+logger.info("API_FOOTBALL_KEY: %s", "OK" if API_FOOTBALL_KEY else "MANCANTE")
 
 if not TOKEN or not WEBHOOK_URL:
-    logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti! Verifica i Secret Files su Render.")
+    logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti! Verifica Env Vars o Secret Files.")
     exit(1)
 
 bot = telebot.TeleBot(TOKEN)
