@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from config import TG_BOT_TOKEN, WEBHOOK_URL
 from database import add_user, decrement_pronostico, has_started
@@ -7,7 +7,6 @@ from football_api import get_pronostico, get_campionati
 from payments import create_checkout_session
 import logging
 import asyncio
-import telegram
 
 # -------------------------------
 # Logging
@@ -21,17 +20,18 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # -------------------------------
-# Bot Telegram con pool più grande
+# Application Telegram con pool e timeout
 # -------------------------------
-bot = Bot(
-    token=TG_BOT_TOKEN,
-    pool_timeout=30,          # aumenta timeout pool
-    connection_pool_size=50   # aumenta connessioni contemporanee
-)
+request_kwargs = {
+    "connect_timeout": 30,
+    "read_timeout": 30,
+    "pool_timeout": 30,
+    "connection_pool_size": 50,
+}
 
-application = ApplicationBuilder().bot(bot).build()
+application = ApplicationBuilder().token(TG_BOT_TOKEN).request_kwargs(request_kwargs).build()
 
-# Inizializza bot (necessario prima dei webhook)
+# Inizializza bot
 asyncio.get_event_loop().run_until_complete(application.initialize())
 
 # -------------------------------
@@ -40,23 +40,16 @@ asyncio.get_event_loop().run_until_complete(application.initialize())
 last_message = {}  # user_id -> message_id
 
 async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
-    """Invia un messaggio eliminando il precedente dell'utente in sicurezza."""
+    """Invia un messaggio eliminando il precedente dell'utente."""
     if user_id in last_message:
         try:
             await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-        except telegram.error.TelegramError:
+        except:
             pass  # ignora errori se messaggio già cancellato
 
-    try:
-        msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
-        last_message[user_id] = msg.message_id
-        return msg
-    except telegram.error.TimedOut:
-        logger.warning(f"Timeout inviando messaggio a {chat_id}")
-        return None
-    except telegram.error.TelegramError as e:
-        logger.exception(f"Errore inviando messaggio a {chat_id}: {e}")
-        return None
+    msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    last_message[user_id] = msg.message_id
+    return msg
 
 # -------------------------------
 # Handlers
@@ -66,7 +59,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if has_started(user_id):
-        return
+        return  # se ha già cliccato start, non fa nulla
 
     add_user(user_id)
 
@@ -80,13 +73,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    try:
-        await query.answer()
-    except telegram.error.TimedOut:
-        logger.warning(f"Timeout answer_callback_query per {query.from_user.id}")
-    except telegram.error.TelegramError as e:
-        logger.exception(f"Errore answer_callback_query: {e}")
-
+    await query.answer()
     user_id = query.from_user.id
     chat_id = query.message.chat.id
     data = query.data
@@ -133,11 +120,8 @@ def webhook():
     """Riceve update da Telegram e li processa thread-safe."""
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
-
-    # Esegui nel loop corretto
     loop = asyncio.get_event_loop()
-    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
-
+    loop.create_task(application.process_update(update))
     return "ok"
 
 # -------------------------------
