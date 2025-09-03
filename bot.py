@@ -1,58 +1,36 @@
-from flask import Flask, request, jsonify
+# bot.py
 import os
-import telebot
 import logging
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from flask import Flask, request, jsonify
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from db import init_db, add_user, get_user, set_vip, set_plan, decrement_ticket_quota, get_all_users
+from bot_logic import generate_daily_tickets_for_user, send_daily_to_user
 
-from db import init_db, add_user, get_all_users, get_user_tickets, get_user, set_plan, is_vip_user
-from bot_logic import send_daily_to_user
-from payments import create_vip_checkout_session, create_ticket_checkout_session, handle_stripe_webhook
-
-# --- Config logging ---
+# =========================
+# Logging
+# =========================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Variabili d'ambiente ---
+# =========================
+# Config environment
+# =========================
 TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
 
 if not TOKEN or not WEBHOOK_URL:
-    logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti!")
+    logger.error("TG_BOT_TOKEN o WEBHOOK_URL mancanti")
     exit(1)
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# -------------------------------
-# Costanti categorie
-# -------------------------------
-CATEGORIES = ["Premier League", "Serie A", "LaLiga", "Bundesliga", "Ligue 1"]
-
 # =========================
-# Helpers menu
+# Categorie disponibili
 # =========================
-def main_menu(user_id):
-    user = get_user(user_id)
-    markup = InlineKeyboardMarkup()
-    markup.row_width = 1
-
-    markup.add(
-        InlineKeyboardButton("📄 I miei ticket", callback_data="my_tickets"),
-        InlineKeyboardButton("⚡ Aggiorna a VIP", callback_data="upgrade_vip"),
-        InlineKeyboardButton("🎫 Acquista pacchetto ticket", callback_data="buy_ticket"),
-        InlineKeyboardButton("🏟 Seleziona categorie", callback_data="select_categories")
-    )
-    return markup
-
-def categories_menu(user_id):
-    user = get_user(user_id)
-    markup = InlineKeyboardMarkup()
-    for cat in CATEGORIES:
-        selected = "✅" if user and cat in user.get("categories", []) else ""
-        markup.add(InlineKeyboardButton(f"{selected} {cat}", callback_data=f"cat_{cat}"))
-    markup.add(InlineKeyboardButton("🔙 Indietro", callback_data="back_main"))
-    return markup
+CATEGORIES = ["Premier League", "Serie A", "La Liga", "Bundesliga", "Ligue 1"]
 
 # =========================
 # Handlers Telegram
@@ -62,61 +40,70 @@ def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     add_user(user_id, username)
-    bot.send_message(user_id, "Benvenuto! Riceverai i pronostici ogni giorno!")
-    bot.send_message(user_id, "Seleziona un'opzione dal menu:", reply_markup=main_menu(user_id))
+    bot.send_message(user_id, "Benvenuto! Scegli la tua categoria preferita per ricevere pronostici.")
+    show_category_menu(user_id)
 
-@bot.callback_query_handler(func=lambda c: True)
-def handle_callback(query: CallbackQuery):
-    user_id = query.from_user.id
-    data = query.data
+def show_category_menu(user_id):
+    markup = InlineKeyboardMarkup()
+    for cat in CATEGORIES:
+        markup.add(InlineKeyboardButton(cat, callback_data=f"cat_{cat}"))
+    bot.send_message(user_id, "Seleziona la categoria:", reply_markup=markup)
 
-    if data == "my_tickets":
-        tickets = get_user_tickets(user_id)
-        if not tickets:
-            bot.send_message(user_id, "Non hai ancora ticket registrati.")
-        else:
-            resp = ""
-            for t in tickets[-5:]:
-                preds = "\n".join(t["predictions"])
-                resp += f"📅 {t['created_at']} [{t['category']}]\n{preds}\n\n"
-            bot.send_message(user_id, resp)
-        bot.send_message(user_id, "Menu principale:", reply_markup=main_menu(user_id))
+def show_plan_menu(user_id):
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("Free (3 pronostici giornalieri)", callback_data="plan_free"),
+        InlineKeyboardButton("VIP (tutte le schedine giornaliere)", callback_data="plan_vip"),
+        InlineKeyboardButton("Pay 2€ per 10 schedine", callback_data="plan_pay")
+    )
+    bot.send_message(user_id, "Scegli il tuo piano:", reply_markup=markup)
 
-    elif data == "upgrade_vip":
-        if is_vip_user(user_id):
-            bot.send_message(user_id, "Sei già VIP!")
-        else:
-            url = create_vip_checkout_session(user_id)
-            if url:
-                bot.send_message(user_id, f"Completa l'acquisto VIP qui: {url}")
-            else:
-                bot.send_message(user_id, "Errore nella creazione sessione VIP.")
-        bot.send_message(user_id, "Menu principale:", reply_markup=main_menu(user_id))
+# =========================
+# Callback query
+# =========================
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    user_id = call.from_user.id
+    data = call.data
 
-    elif data == "buy_ticket":
-        url = create_ticket_checkout_session(user_id, num_tickets=10)
-        if url:
-            bot.send_message(user_id, f"Acquista 10 ticket qui: {url}")
-        else:
-            bot.send_message(user_id, "Errore nella creazione sessione ticket.")
-        bot.send_message(user_id, "Menu principale:", reply_markup=main_menu(user_id))
-
-    elif data == "select_categories":
-        bot.send_message(user_id, "Seleziona le categorie:", reply_markup=categories_menu(user_id))
-
-    elif data.startswith("cat_"):
-        cat = data.replace("cat_", "")
+    if data.startswith("cat_"):
+        category = data.replace("cat_", "")
         user = get_user(user_id)
-        current = user.get("categories", [])
-        if cat in current:
-            current.remove(cat)
-        else:
-            current.append(cat)
-        set_plan(user_id, user.get("plan", "free"), categories=current)
-        bot.send_message(user_id, "Categorie aggiornate!", reply_markup=categories_menu(user_id))
+        set_plan(user_id, plan=user.get("plan", "free"), categories=[category])
+        bot.send_message(user_id, f"Categoria impostata: {category}")
+        show_plan_menu(user_id)
+    elif data.startswith("plan_"):
+        plan_choice = data.replace("plan_", "")
+        if plan_choice == "free":
+            set_plan(user_id, "free", ticket_quota=0)
+            bot.send_message(user_id, "✅ Piano Free attivato. Riceverai 3 pronostici giornalieri.")
+        elif plan_choice == "vip":
+            set_vip(user_id, 1)
+            bot.send_message(user_id, "🎉 Sei diventato VIP! Riceverai tutte le schedine giornaliere.")
+        elif plan_choice == "pay":
+            set_plan(user_id, "pay", ticket_quota=10)
+            bot.send_message(user_id, "💶 Piano Pay attivato! Hai 10 schedine disponibili da consumare.")
 
-    elif data == "back_main":
-        bot.send_message(user_id, "Menu principale:", reply_markup=main_menu(user_id))
+# =========================
+# Comandi utente
+# =========================
+@bot.message_handler(commands=["mytickets"])
+def mytickets(message):
+    user_id = message.from_user.id
+    user = get_user(user_id)
+    tickets = generate_daily_tickets_for_user(user_id, vip=user.get("vip", False))
+    if user.get("plan") == "pay" and user.get("ticket_quota", 0) > 0:
+        decrement_ticket_quota(user_id, 1)
+    if not tickets:
+        bot.send_message(user_id, "Non ci sono schedine disponibili oggi.")
+        return
+    text = "📄 I tuoi ticket:\n\n"
+    for idx, t in enumerate(tickets, 1):
+        text += f"📅 Ticket {idx} ({t.get('category','N/A')}):\n"
+        for i, p in enumerate(t["predictions"], 1):
+            text += f"{i}. {p}\n"
+        text += "\n"
+    bot.send_message(user_id, text)
 
 # =========================
 # Webhook Telegram
@@ -125,7 +112,6 @@ def handle_callback(query: CallbackQuery):
 def telegram_webhook():
     try:
         json_str = request.get_data(as_text=True)
-        logger.info("📩 Update ricevuto da Telegram: %s", json_str)
         update = telebot.types.Update.de_json(json_str)
         bot.process_new_updates([update])
     except Exception as e:
@@ -134,18 +120,20 @@ def telegram_webhook():
     return jsonify({"status": "ok"}), 200
 
 # =========================
-# Webhook Stripe
+# Admin
 # =========================
-@app.route("/stripe/webhook", methods=["POST"])
-def stripe_webhook():
-    payload = request.data
-    sig_header = request.headers.get("Stripe-Signature")
+@app.route("/admin/send_today", methods=["POST"])
+def send_today():
+    token = request.args.get("token")
+    if token != ADMIN_TOKEN:
+        return jsonify({"error": "Forbidden"}), 403
     try:
-        success = handle_stripe_webhook(payload, sig_header)
+        for uid in get_all_users():
+            send_daily_to_user(bot, uid)
     except Exception as e:
-        logger.error("Errore webhook Stripe: %s", e)
-        return jsonify({"error": str(e)}), 400
-    return jsonify({"status": "ok"}), 200 if success else 400
+        logger.error("Errore invio pronostici: %s", e)
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "invio avviato"}), 200
 
 # =========================
 # Health check
