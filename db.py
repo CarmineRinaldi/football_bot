@@ -85,6 +85,15 @@ def decrement_ticket_quota(user_id, n=1):
     conn.commit()
     conn.close()
 
+def get_all_users():
+    """Restituisce tutti gli utenti nel DB"""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM users")
+    rows = c.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
 # ------------------------------
 # Tickets management
 # ------------------------------
