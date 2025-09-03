@@ -1,162 +1,121 @@
-import os
 import sqlite3
-from datetime import date
+import os
+from datetime import datetime
 
-DB_FILE = os.environ.get("DB_FILE", "bot.db")
+DB_FILE = os.environ.get("DB_FILE", "football_bot.db")
 
-# ------------------------------
-# DB connection helper
-# ------------------------------
-def get_conn():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-# ------------------------------
-# Initialization
-# ------------------------------
+# =========================
+# Inizializzazione DB
+# =========================
 def init_db():
-    conn = get_conn()
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("""
+    # Tabella utenti
+    c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
-            first_name TEXT,
             plan TEXT DEFAULT 'free',
-            ticket_quota INTEGER DEFAULT 0
+            ticket_quota INTEGER DEFAULT 0,
+            categories TEXT DEFAULT ''
         )
-    """)
-    c.execute("""
+    ''')
+    # Tabella ticket
+    c.execute('''
         CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
-            created_at TEXT,
             category TEXT,
-            predictions TEXT
+            predictions TEXT,
+            created_at TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
         )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS user_categories (
-            user_id INTEGER PRIMARY KEY,
-            categories TEXT
-        )
-    """)
+    ''')
     conn.commit()
     conn.close()
 
-# ------------------------------
-# User management
-# ------------------------------
-def add_user(user_id, username="", first_name=""):
-    conn = get_conn()
+# =========================
+# Funzioni utenti
+# =========================
+def add_user(user_id, username=""):
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)",
-              (user_id, username, first_name))
+    c.execute("INSERT OR IGNORE INTO users(user_id, username) VALUES (?, ?)", (user_id, username))
     conn.commit()
     conn.close()
 
 def get_user(user_id):
-    conn = get_conn()
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    c.execute("SELECT user_id, username, plan, ticket_quota, categories FROM users WHERE user_id=?", (user_id,))
     row = c.fetchone()
     conn.close()
     if row:
-        return dict(row)
+        return {
+            "user_id": row[0],
+            "username": row[1],
+            "plan": row[2],
+            "ticket_quota": row[3],
+            "categories": row[4].split(",") if row[4] else []
+        }
     return None
 
-def set_user_plan(user_id, plan, ticket_quota=0):
-    """Imposta il piano dell'utente e quota ticket (per pay/vip)"""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO users (user_id, plan, ticket_quota)
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, ticket_quota=excluded.ticket_quota
-    """, (user_id, plan, ticket_quota))
-    conn.commit()
-    conn.close()
-
-def decrement_ticket_quota(user_id, n=1):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE users SET ticket_quota = ticket_quota - ? WHERE user_id=? AND ticket_quota>=?", (n, user_id, n))
-    conn.commit()
-    conn.close()
-
 def get_all_users():
-    """Restituisce tutti gli utenti nel DB"""
-    conn = get_conn()
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT * FROM users")
+    c.execute("SELECT user_id FROM users")
     rows = c.fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [r[0] for r in rows]
 
-# ------------------------------
-# Tickets management
-# ------------------------------
-def add_ticket(user_id, ticket):
-    conn = get_conn()
+def set_user_plan(user_id, plan):
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    today = str(date.today())
-    predictions_str = "\n".join(ticket.get("predictions", []))
-    c.execute("INSERT INTO tickets (user_id, created_at, category, predictions) VALUES (?, ?, ?, ?)",
-              (user_id, today, ticket.get("category"), predictions_str))
+    c.execute("UPDATE users SET plan=? WHERE user_id=?", (plan, user_id))
     conn.commit()
     conn.close()
 
-def get_user_tickets(user_id, created_at=None):
-    conn = get_conn()
+def set_user_categories(user_id, categories):
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    if created_at:
-        c.execute("SELECT * FROM tickets WHERE user_id=? AND created_at=?", (user_id, created_at))
+    cat_str = ",".join(categories)
+    c.execute("UPDATE users SET categories=? WHERE user_id=?", (cat_str, user_id))
+    conn.commit()
+    conn.close()
+
+# =========================
+# Funzioni ticket
+# =========================
+def get_user_tickets(user_id, date_filter=None):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    if date_filter:
+        c.execute("SELECT category, predictions FROM tickets WHERE user_id=? AND created_at=?", (user_id, date_filter))
     else:
-        c.execute("SELECT * FROM tickets WHERE user_id=?", (user_id,))
+        c.execute("SELECT category, predictions FROM tickets WHERE user_id=?", (user_id,))
     rows = c.fetchall()
     conn.close()
     tickets = []
-    for row in rows:
+    for r in rows:
         tickets.append({
-            "id": row["id"],
-            "user_id": row["user_id"],
-            "created_at": row["created_at"],
-            "category": row["category"],
-            "predictions": row["predictions"].split("\n")
+            "category": r[0],
+            "predictions": r[1].split(",") if r[1] else []
         })
     return tickets
 
-# ------------------------------
-# User categories
-# ------------------------------
-def set_user_categories(user_id, categories):
-    conn = get_conn()
+def add_ticket(user_id, category, predictions):
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    categories_str = ",".join(categories)
-    c.execute("""
-        INSERT INTO user_categories (user_id, categories)
-        VALUES (?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET categories=excluded.categories
-    """, (user_id, categories_str))
+    pred_str = ",".join(predictions)
+    created_at = datetime.now().strftime("%Y-%m-%d")
+    c.execute("INSERT INTO tickets(user_id, category, predictions, created_at) VALUES (?, ?, ?, ?)",
+              (user_id, category, pred_str, created_at))
     conn.commit()
     conn.close()
 
-def get_user_categories(user_id):
-    conn = get_conn()
+def decrement_ticket_quota(user_id):
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT categories FROM user_categories WHERE user_id=?", (user_id,))
-    row = c.fetchone()
+    c.execute("UPDATE users SET ticket_quota = ticket_quota - 1 WHERE user_id=? AND ticket_quota > 0", (user_id,))
+    conn.commit()
     conn.close()
-    if row and row["categories"]:
-        return row["categories"].split(",")
-    return []
-
-# ------------------------------
-# VIP management
-# ------------------------------
-def is_vip_user(user_id):
-    user = get_user(user_id)
-    if user:
-        return user.get("plan") in ("vip", "pay")
-    return False
