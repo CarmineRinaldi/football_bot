@@ -17,7 +17,7 @@ NUM_TICKETS_PAY = 10
 PREDICTIONS_PER_TICKET = 5
 
 # ------------------------
-# Utils
+# Utils generazione pronostici fittizi
 # ------------------------
 def _fake_predictions(category, n=50):
     teams_by_cat = {
@@ -62,7 +62,7 @@ def fetch_matches(category):
         return []
 
 # ------------------------
-# Generazione schedine
+# Generazione singola schedina
 # ------------------------
 def generate_ticket(user_id, vip_only=False, category=None):
     matches = fetch_matches(category) if category else []
@@ -81,10 +81,13 @@ def generate_ticket(user_id, vip_only=False, category=None):
             ticket.append(f"{home} vs {away} → {outcome}")
 
     if not vip_only:
-        ticket = ticket[:3]
+        ticket = ticket[:3]  # solo prime 3 per utenti free
 
-    return {"predictions": ticket, "category": category or "Premier League"}
+    return {"predictions": ticket, "category": category or "Premier League", "vip_only": int(vip_only)}
 
+# ------------------------
+# Generazione schedine giornaliere per utente
+# ------------------------
 def generate_daily_tickets_for_user(user_id):
     user = get_user(user_id)
     if not user:
@@ -118,7 +121,7 @@ def generate_daily_tickets_for_user(user_id):
     return get_user_tickets(user_id, today)
 
 # ------------------------
-# Invio schedine
+# Invio schedine via bot
 # ------------------------
 def send_daily_to_user(bot, user_id):
     tickets = get_user_tickets(user_id, str(date.today()))
