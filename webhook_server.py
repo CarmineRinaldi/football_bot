@@ -100,20 +100,33 @@ def mytickets(message):
         user_id = message.from_user.id
         vip = is_vip_user(user_id)
         today = str(date.today())
+
         # Genera le schedine se non ci sono
         generate_daily_tickets_for_user(user_id, vip)
         tickets = get_user_tickets(user_id, today)
+
         if not tickets:
             bot.send_message(user_id, "Non ci sono schedine disponibili oggi.")
             return
+
         for idx, t in enumerate(tickets, 1):
+            # Estraggo i pronostici in modo sicuro
+            preds = None
+            if isinstance(t, dict):
+                if "predictions" in t:  # formato semplice
+                    preds = t["predictions"]
+                elif "data" in t and isinstance(t["data"], dict):
+                    preds = t["data"].get("predictions", [])
+
+            if not preds:
+                continue
+
             if not vip:
-                # Free user: mostra solo 3 pronostici per schedina
-                limited_preds = t["predictions"][:3]
-                t_display = {"predictions": limited_preds}
-            else:
-                t_display = t
-            bot.send_message(user_id, f"Schedina {idx}:\n{json.dumps(t_display, indent=2)}")
+                preds = preds[:3]  # Free → solo 3 pronostici
+
+            msg = f"🎟️ Schedina {idx}:\n" + "\n".join(preds)
+            bot.send_message(user_id, msg)
+
     except Exception as e:
         logger.exception("Errore handler /mytickets: %s", e)
         bot.send_message(message.chat.id, "Errore nel recupero schedine.")
