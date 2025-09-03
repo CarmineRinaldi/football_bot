@@ -2,8 +2,7 @@ from flask import Flask, request, jsonify
 import os
 import telebot
 import logging
-import requests
-from db import init_db, add_user, get_all_users
+from db import init_db, add_user, get_all_users, get_user_tickets, set_vip, is_vip_user
 from bot_logic import send_daily_to_user
 from payments import handle_stripe_webhook
 
@@ -15,38 +14,17 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
-API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY")  # Inserisci qui la tua chiave API
-API_FOOTBALL_URL = "https://v3.football.api-sports.io"
 
-if not TOKEN or not WEBHOOK_URL or not API_FOOTBALL_KEY:
-    logger.error("Variabili TG_BOT_TOKEN, WEBHOOK_URL o API_FOOTBALL_KEY mancanti!")
+if not TOKEN or not WEBHOOK_URL:
+    logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti!")
     exit(1)
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# --- Funzione per dati Free ---
-def get_free_data():
-    headers = {
-        "x-apisports-key": API_FOOTBALL_KEY
-    }
-    response = requests.get(f"{API_FOOTBALL_URL}/fixtures?live=all", headers=headers)
-    if response.status_code == 200:
-        data = response.json()
-        if data.get("response"):
-            fixtures = data["response"]
-            messages = []
-            for f in fixtures[:5]:  # Primi 5 risultati
-                home = f["fixture"]["home"]["name"]
-                away = f["fixture"]["away"]["name"]
-                score = f["score"]["fulltime"]
-                messages.append(f"{home} vs {away} → {score['home']}:{score['away']}")
-            return "\n".join(messages)
-        return "Nessuna partita live al momento."
-    else:
-        return f"Errore API: {response.status_code}"
-
-# --- Handlers Telegram ---
+# =========================
+# Handlers Telegram
+# =========================
 @bot.message_handler(commands=["start"])
 def start(message):
     user_id = message.from_user.id
@@ -59,15 +37,37 @@ def list_users_command(message):
     user_ids = get_all_users()
     bot.send_message(message.chat.id, f"Utenti registrati:\n{user_ids}")
 
-@bot.message_handler(commands=["free"])
-def free_command(message):
-    try:
-        data = get_free_data()
-        bot.send_message(message.chat.id, data)
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Errore nel recupero dati: {e}")
+@bot.message_handler(commands=["myticket"])
+def myticket(message):
+    user_id = message.from_user.id
+    tickets = get_user_tickets(user_id)
+    
+    if not tickets:
+        bot.send_message(user_id, "Non hai ancora ticket registrati.")
+        return
 
-# --- Webhook Telegram ---
+    response = "📄 I tuoi ticket:\n\n"
+    for t in tickets[-5:]:  # mostra solo gli ultimi 5
+        preds = "\n".join(t['predictions'])
+        created = t['created_at']
+        response += f"📅 {created}:\n{preds}\n\n"
+    
+    bot.send_message(user_id, response)
+
+@bot.message_handler(commands=["upgrade"])
+def upgrade(message):
+    user_id = message.from_user.id
+    if is_vip_user(user_id):
+        bot.send_message(user_id, "Sei già VIP!")
+        return
+
+    # Per ora VIP test, in futuro integra Stripe
+    set_vip(user_id, 1)
+    bot.send_message(user_id, "🎉 Sei diventato VIP! Ora riceverai pronostici premium.")
+
+# =========================
+# Webhook Telegram
+# =========================
 @app.route("/telegram", methods=["POST"])
 def telegram_webhook():
     try:
@@ -80,7 +80,9 @@ def telegram_webhook():
         return jsonify({"error": str(e)}), 400
     return jsonify({"status": "ok"}), 200
 
-# --- Endpoint admin ---
+# =========================
+# Endpoint admin
+# =========================
 @app.route("/admin/send_today", methods=["POST"])
 def send_today():
     token = request.args.get("token")
@@ -94,7 +96,9 @@ def send_today():
         return jsonify({"error": str(e)}), 500
     return jsonify({"status": "invio avviato"}), 200
 
-# --- Webhook Stripe ---
+# =========================
+# Webhook Stripe
+# =========================
 @app.route("/stripe/webhook", methods=["POST"])
 def stripe_webhook():
     payload = request.data
@@ -107,17 +111,23 @@ def stripe_webhook():
 
     return jsonify({"status": "ok"}), 200 if success else 400
 
-# --- Health check ---
+# =========================
+# Health check
+# =========================
 @app.route("/healthz")
 def health():
     return jsonify({"status": "ok"}), 200
 
-# --- Test endpoint ---
+# =========================
+# Test endpoint
+# =========================
 @app.route("/test")
 def test():
     return jsonify({"status": "server ok"}), 200
 
-# --- Main ---
+# =========================
+# Main
+# =========================
 if __name__ == "__main__":
     init_db()
     bot.remove_webhook()
