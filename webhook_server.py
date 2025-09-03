@@ -60,9 +60,11 @@ def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     add_user(user_id, username)
-    bot.send_message(user_id,
-                     "Benvenuto! Usa il menu per gestire il tuo piano e le schedine.",
-                     reply_markup=main_menu())
+    bot.send_message(
+        user_id,
+        "Benvenuto! Usa il menu per gestire il tuo piano e le schedine.",
+        reply_markup=main_menu()
+    )
 
 @bot.callback_query_handler(func=lambda c: True)
 def callback_handler(call):
@@ -80,7 +82,7 @@ def callback_handler(call):
         set_user_categories(user_id, categories)
         bot.send_message(user_id, f"✅ Aggiunto {league} ai tuoi campionati preferiti.", reply_markup=main_menu())
     elif data == "my_tickets":
-        tickets = get_user_tickets(user_id, date_filter=None)
+        tickets = get_user_tickets(user_id)
         if not tickets:
             tickets = generate_daily_tickets_for_user(user_id)
         if not tickets:
@@ -95,7 +97,6 @@ def callback_handler(call):
         if user.get("plan") == "vip":
             bot.send_message(user_id, "Sei già VIP!", reply_markup=main_menu())
         else:
-            # Qui potresti integrare Stripe VIP
             set_user_plan(user_id, "vip")
             bot.send_message(user_id, "🎉 Sei diventato VIP!", reply_markup=main_menu())
     elif data == "buy_pay":
@@ -103,7 +104,6 @@ def callback_handler(call):
         if user.get("plan") == "pay" and user.get("ticket_quota",0) > 0:
             bot.send_message(user_id, f"Hai ancora {user['ticket_quota']} ticket disponibili.", reply_markup=main_menu())
         else:
-            # Qui l'integrazione Stripe per acquistare pacchetto 10 ticket
             bot.send_message(user_id, "💰 Pagamento pacchetto da 2€ (da integrare Stripe).", reply_markup=main_menu())
     else:
         bot.send_message(user_id, "⚠️ Comando non riconosciuto.", reply_markup=main_menu())
