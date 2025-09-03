@@ -113,7 +113,10 @@ def webhook():
     """Riceve update da Telegram e li processa thread-safe."""
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
-    asyncio.run_coroutine_threadsafe(application.process_update(update), application.bot.loop)
+
+    loop = asyncio.get_event_loop()
+    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
+    
     return "ok"
 
 # -------------------------------
