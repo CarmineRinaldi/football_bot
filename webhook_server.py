@@ -58,6 +58,10 @@ application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
+# 🔧 Inizializza l’application per il webhook
+loop = asyncio.get_event_loop()
+loop.run_until_complete(application.initialize())
+
 # -------------------------------
 # Webhook endpoint
 # -------------------------------
@@ -65,7 +69,6 @@ application.add_handler(CallbackQueryHandler(button_handler))
 def webhook():
     try:
         update = Update.de_json(request.get_json(force=True), application.bot)
-        # esegue subito la coroutine invece di create_task
         asyncio.run(application.process_update(update))
         return "ok"
     except Exception as e:
