@@ -1,6 +1,6 @@
 import stripe
 import os
-from flask import request, jsonify
+from db import set_user_plan, increment_user_tickets  # assume increment_user_tickets è implementata
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
@@ -11,7 +11,7 @@ STRIPE_PRICE_VIP = "prod_SzHNxZCTAwhDN8"   # Abbonamento mensile VIP
 STRIPE_PRICE_PACK = "prod_SzHRKztJPEsrLS"  # Pacchetto 2€ di pronostici
 
 # =========================
-# Funzione per creare Checkout session
+# Crea sessione Checkout Stripe
 # =========================
 def create_checkout_session(user_id, product_type):
     if product_type == "vip":
@@ -37,7 +37,7 @@ def create_checkout_session(user_id, product_type):
 def handle_stripe_webhook(payload, sig_header):
     try:
         event = stripe.Webhook.construct_event(
-            payload, sig_header, os.environ.get("STRIPE_WEBHOOK_SECRET")
+            payload, sig_header, os.environ.get("STRIPE_ENDPOINT_SECRET")
         )
     except Exception as e:
         raise e
@@ -46,12 +46,12 @@ def handle_stripe_webhook(payload, sig_header):
         session = event['data']['object']
         user_id = session['metadata']['user_id']
         product_type = session['metadata']['product_type']
-        # Qui aggiorni il piano o i pronostici dell’utente
+
+        # Aggiorna DB utente
         if product_type == "vip":
-            from db import set_user_plan
             set_user_plan(user_id, "vip")
         elif product_type == "pack":
-            from db import increment_user_tickets
-            increment_user_tickets(user_id, 10)  # 10 pronostici da aggiungere
+            # aggiunge 10 schedine extra
+            increment_user_tickets(user_id, 10)
 
     return True
