@@ -1,4 +1,3 @@
-# db.py
 import sqlite3
 import logging
 import json
@@ -30,7 +29,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
-            data TEXT,
+            data TEXT,  -- JSON con {"predictions": [...]}
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(user_id) REFERENCES users(id)
         )
@@ -72,9 +71,6 @@ def get_all_users():
         return []
 
 def is_vip_user(user_id):
-    """
-    Controlla se un utente è VIP
-    """
     try:
         conn = sqlite3.connect(DB_FILE)
         cur = conn.cursor()
@@ -87,9 +83,6 @@ def is_vip_user(user_id):
         return False
 
 def set_vip(user_id, vip_status=1):
-    """
-    Imposta lo stato VIP di un utente (1 = VIP, 0 = non VIP)
-    """
     try:
         conn = sqlite3.connect(DB_FILE)
         cur = conn.cursor()
@@ -105,13 +98,15 @@ def set_vip(user_id, vip_status=1):
 # =========================
 def add_ticket(user_id, ticket_data):
     """
-    ticket_data: dict o qualsiasi struttura serializzabile JSON
+    ticket_data deve essere una lista di pronostici (es: ["Juventus vs Milan → 1", "Roma vs Inter → X"])
+    Salviamo sempre come {"predictions": [...]} per uniformità
     """
     try:
+        normalized = {"predictions": ticket_data}
         conn = sqlite3.connect(DB_FILE)
         cur = conn.cursor()
         cur.execute("INSERT INTO tickets (user_id, data) VALUES (?, ?)",
-                    (user_id, json.dumps(ticket_data)))
+                    (user_id, json.dumps(normalized)))
         conn.commit()
         conn.close()
         logger.info("Ticket aggiunto per utente %s", user_id)
@@ -141,8 +136,13 @@ def get_user_tickets(user_id, date_filter=None):
 
         tickets = []
         for row in rows:
+            try:
+                data = json.loads(row[0])
+                preds = data.get("predictions", [])
+            except Exception:
+                preds = []
             tickets.append({
-                "predictions": json.loads(row[0]),
+                "predictions": preds,
                 "created_at": row[1]
             })
         return tickets
