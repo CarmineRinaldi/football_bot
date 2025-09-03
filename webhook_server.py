@@ -17,16 +17,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # =========================
-# Variabili d'ambiente
+# Variabili d'ambiente e Secret Files
 # =========================
-TOKEN = os.environ.get("TG_BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+def read_secret(file_name):
+    """Legge il contenuto di un Secret File, se esiste"""
+    path = f"/run/secrets/{file_name}"
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return f.read().strip()
+    return None
+
+# Prova a leggere dai Secret Files
+TOKEN = read_secret("TG_BOT_TOKEN") or os.environ.get("TG_BOT_TOKEN")
+WEBHOOK_URL = read_secret("WEBHOOK_URL") or os.environ.get("WEBHOOK_URL")
 ADMIN_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN", "metti_un_token_lungo")
 
 logger.info("Variabili d'ambiente lette:")
-logger.info("TG_BOT_TOKEN: %s", "SET" if TOKEN else "MANCANTE")
-logger.info("WEBHOOK_URL: %s", "SET" if WEBHOOK_URL else "MANCANTE")
-logger.info("ADMIN_HTTP_TOKEN: %s", ADMIN_TOKEN)
+logger.info("TG_BOT_TOKEN: %s", "PRESENTE" if TOKEN else "MANCANTE")
+logger.info("WEBHOOK_URL: %s", "PRESENTE" if WEBHOOK_URL else "MANCANTE")
+logger.info("ADMIN_HTTP_TOKEN: %s", ADMIN_TOKEN[:6] + "...")
 
 if not TOKEN or not WEBHOOK_URL:
     logger.error("Variabili TG_BOT_TOKEN o WEBHOOK_URL mancanti! Verifica i Secret Files su Render.")
@@ -177,7 +186,6 @@ def health():
 # =========================
 if __name__ == "__main__":
     init_db()
-    logger.info("Avvio bot...")
     bot.remove_webhook()
     bot.set_webhook(url=f"{WEBHOOK_URL}/telegram")
     logger.info("Bot webhook impostato su %s/telegram", WEBHOOK_URL)
