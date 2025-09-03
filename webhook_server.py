@@ -65,7 +65,8 @@ application.add_handler(CallbackQueryHandler(button_handler))
 def webhook():
     try:
         update = Update.de_json(request.get_json(force=True), application.bot)
-        asyncio.create_task(application.process_update(update))
+        # esegue subito la coroutine invece di create_task
+        asyncio.run(application.process_update(update))
         return "ok"
     except Exception as e:
         logger.exception("Errore nel processing webhook")
