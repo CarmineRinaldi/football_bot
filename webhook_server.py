@@ -1,13 +1,11 @@
-# webhook_server.py
 import os
 import logging
 from flask import Flask, request, jsonify
 import telebot
-import json
 from datetime import date
 
 # --- moduli locali ---
-from db import init_db, add_user, get_all_users, is_vip_user, add_ticket, get_user_tickets
+from db import init_db, add_user, get_all_users, is_vip_user, get_user_tickets
 from bot_logic import send_daily_to_user, generate_daily_tickets_for_user
 
 # =========================
@@ -101,7 +99,7 @@ def mytickets(message):
         vip = is_vip_user(user_id)
         today = str(date.today())
 
-        # Genera le schedine se non ci sono
+        # Genera schedine se non ci sono
         generate_daily_tickets_for_user(user_id, vip)
         tickets = get_user_tickets(user_id, today)
 
@@ -110,13 +108,7 @@ def mytickets(message):
             return
 
         for idx, t in enumerate(tickets, 1):
-            # Estraggo i pronostici in modo sicuro
-            preds = None
-            if isinstance(t, dict):
-                if "predictions" in t:  # formato semplice
-                    preds = t["predictions"]
-                elif "data" in t and isinstance(t["data"], dict):
-                    preds = t["data"].get("predictions", [])
+            preds = t.get("predictions", [])
 
             if not preds:
                 continue
