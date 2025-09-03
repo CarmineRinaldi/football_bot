@@ -57,7 +57,8 @@ application.add_handler(CallbackQueryHandler(button_handler))
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
+    # usa create_task per non bloccare Flask
+    asyncio.create_task(application.process_update(update))
     return "ok"
 
 # -------------------------------
@@ -72,7 +73,11 @@ def index():
 # -------------------------------
 @app.route("/set_webhook", methods=["GET"])
 def set_webhook():
-    success = application.bot.set_webhook(WEBHOOK_URL + "/webhook")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    success = loop.run_until_complete(application.bot.set_webhook(WEBHOOK_URL + "/webhook"))
+    loop.close()
+
     if success:
         return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
     else:
