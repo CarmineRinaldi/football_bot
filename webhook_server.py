@@ -58,28 +58,29 @@ application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# 🔧 Inizializza bot e loop
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-loop.run_until_complete(application.initialize())
-application.loop = loop  # assegna il loop all'applicazione
+# 🔧 Inizializza bot (solo una volta)
+asyncio.get_event_loop().run_until_complete(application.initialize())
 
 # -------------------------------
 # Webhook endpoint
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Riceve update da Telegram e li processa in modo thread-safe."""
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
 
+    # Crea un loop temporaneo per processare l'update (compatibile Gunicorn)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        future = asyncio.run_coroutine_threadsafe(application.process_update(update), application.loop)
-        future.result(timeout=10)  # aspetta massimo 10 secondi
-        return "ok"
+        loop.run_until_complete(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update:")
         return "error", 500
+    finally:
+        loop.close()
+
+    return "ok"
 
 # -------------------------------
 # Endpoint per debug
@@ -89,7 +90,7 @@ def index():
     return "Bot Telegram attivo!"
 
 # -------------------------------
-# Endpoint per impostare webhook da remoto
+# Endpoint per impostare webhook
 # -------------------------------
 @app.route("/set_webhook", methods=["GET"])
 def set_webhook():
@@ -97,19 +98,17 @@ def set_webhook():
         await application.bot.delete_webhook()
         return await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        success = asyncio.run_coroutine_threadsafe(setup_webhook(), application.loop).result()
+        success = loop.run_until_complete(setup_webhook())
     except Exception as e:
         logger.exception("Errore impostando il webhook")
         return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        loop.close()
 
     if success:
         return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
     else:
         return jsonify({"status": "error", "message": "Errore nell'impostazione del webhook"}), 500
-
-# -------------------------------
-# Avvio locale (solo debug)
-# -------------------------------
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
