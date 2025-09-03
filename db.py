@@ -1,6 +1,7 @@
 # db.py
 import sqlite3
 import logging
+import json
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def get_all_users():
         logger.exception("Errore get_all_users: %s", e)
         return []
 
-def is_vip(user_id):
+def is_vip_user(user_id):
     """
     Controlla se un utente è VIP
     """
@@ -82,8 +83,22 @@ def is_vip(user_id):
         conn.close()
         return bool(row[0]) if row else False
     except Exception as e:
-        logger.exception("Errore is_vip: %s", e)
+        logger.exception("Errore is_vip_user: %s", e)
         return False
+
+def set_vip(user_id, vip_status=1):
+    """
+    Imposta lo stato VIP di un utente (1 = VIP, 0 = non VIP)
+    """
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET vip=? WHERE id=?", (vip_status, user_id))
+        conn.commit()
+        conn.close()
+        logger.info("Utente %s aggiornato VIP=%s", user_id, vip_status)
+    except Exception as e:
+        logger.exception("Errore set_vip: %s", e)
 
 # =========================
 # Gestione tickets
