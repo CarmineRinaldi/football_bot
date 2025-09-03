@@ -96,6 +96,7 @@ def generate_daily_tickets_for_user(user_id, vip=False):
     n_tickets = NUM_TICKETS_VIP if vip else NUM_TICKETS_FREE
     for i in range(n_tickets):
         ticket = generate_ticket(vip_only=vip)
+        # Salvo sempre come dict con chiave "predictions"
         add_ticket(user_id, {
             "predictions": ticket,
             "date": today,
@@ -123,7 +124,8 @@ def send_daily_to_user(bot, user_id):
 
     sent = 0
     for idx, t in enumerate(tickets, 1):
-        preds = t.get("data", {}).get("predictions") if isinstance(t, dict) else t.get("predictions", [])
+        # Estraggo pronostici in modo sicuro
+        preds = t.get("predictions") or t.get("data", {}).get("predictions", [])
         if not preds:
             continue
         lines = [f"📋 Schedina {idx}"]
