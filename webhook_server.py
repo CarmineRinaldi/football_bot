@@ -1,12 +1,13 @@
 from flask import Flask, request, jsonify
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from config import TG_BOT_TOKEN, WEBHOOK_URL
-from database import add_user, decrement_pronostico, get_user, update_plan
+from database import add_user, decrement_pronostico, has_started
 from football_api import get_pronostico, get_campionati
 from payments import create_checkout_session
 import logging
 import asyncio
+import telegram
 
 # -------------------------------
 # Logging
@@ -20,9 +21,17 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # -------------------------------
-# Application Telegram
+# Bot Telegram con pool più grande
 # -------------------------------
-application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
+bot = Bot(
+    token=TG_BOT_TOKEN,
+    pool_timeout=30,          # aumenta timeout pool
+    connection_pool_size=50   # aumenta connessioni contemporanee
+)
+
+application = ApplicationBuilder().bot(bot).build()
+
+# Inizializza bot (necessario prima dei webhook)
 asyncio.get_event_loop().run_until_complete(application.initialize())
 
 # -------------------------------
@@ -31,16 +40,23 @@ asyncio.get_event_loop().run_until_complete(application.initialize())
 last_message = {}  # user_id -> message_id
 
 async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
-    """Invia un messaggio eliminando il precedente dell'utente."""
+    """Invia un messaggio eliminando il precedente dell'utente in sicurezza."""
     if user_id in last_message:
         try:
             await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-        except:
+        except telegram.error.TelegramError:
             pass  # ignora errori se messaggio già cancellato
 
-    msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
-    last_message[user_id] = msg.message_id
-    return msg
+    try:
+        msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        last_message[user_id] = msg.message_id
+        return msg
+    except telegram.error.TimedOut:
+        logger.warning(f"Timeout inviando messaggio a {chat_id}")
+        return None
+    except telegram.error.TelegramError as e:
+        logger.exception(f"Errore inviando messaggio a {chat_id}: {e}")
+        return None
 
 # -------------------------------
 # Handlers
@@ -49,9 +65,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    user = get_user(user_id)
-    if user and user[2] > 0:
-        return  # ha già cliccato start
+    if has_started(user_id):
+        return
 
     add_user(user_id)
 
@@ -65,7 +80,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except telegram.error.TimedOut:
+        logger.warning(f"Timeout answer_callback_query per {query.from_user.id}")
+    except telegram.error.TelegramError as e:
+        logger.exception(f"Errore answer_callback_query: {e}")
+
     user_id = query.from_user.id
     chat_id = query.message.chat.id
     data = query.data
@@ -86,7 +107,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Scelta del campionato ---
     elif data.startswith('camp_'):
         campionato = data.split('_', 1)[1]
-        pronostico = get_pronostico(campionato)
+        pronostico = get_pronostico(user_id, campionato)
         await send_with_delete_previous(user_id, chat_id, f"Pronostico per {campionato}:\n{pronostico}")
 
 # -------------------------------
@@ -109,12 +130,14 @@ application.add_handler(CallbackQueryHandler(button_handler))
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Riceve update da Telegram e li processa."""
+    """Riceve update da Telegram e li processa thread-safe."""
     data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
-    
-    # Usa asyncio.run per evitare errori di loop
-    asyncio.run(application.process_update(update))
+
+    # Esegui nel loop corretto
+    loop = asyncio.get_event_loop()
+    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
+
     return "ok"
 
 # -------------------------------
