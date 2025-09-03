@@ -59,6 +59,7 @@ def leagues_menu():
 def start(message):
     user_id = message.from_user.id
     username = message.from_user.username or ""
+    logger.info("Ricevuto /start da %s (%s)", user_id, username)
     add_user(user_id, username)
     bot.send_message(
         user_id,
@@ -70,6 +71,7 @@ def start(message):
 def callback_handler(call):
     user_id = call.from_user.id
     data = call.data
+    logger.info("Callback ricevuto da %s: %s", user_id, data)
 
     if data == "choose_league":
         bot.send_message(user_id, "📊 Scegli il tuo campionato preferito:", reply_markup=leagues_menu())
@@ -122,6 +124,7 @@ def callback_handler(call):
 def telegram_webhook():
     try:
         json_str = request.get_data(as_text=True)
+        logger.info("Webhook Telegram ricevuto: %s", json_str)
         update = telebot.types.Update.de_json(json_str)
         bot.process_new_updates([update])
     except Exception as e:
