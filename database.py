@@ -4,7 +4,8 @@ import threading
 # -------------------------------
 # Connessione al database SQLite
 # -------------------------------
-conn = sqlite3.connect('users.db', check_same_thread=False)
+DB_FILE = 'users.db'  # puoi anche usare os.environ.get("DB_FILE")
+conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
 
 # Lock per accesso thread-safe al database
