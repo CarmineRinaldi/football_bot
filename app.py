@@ -5,8 +5,7 @@ import threading
 from flask import Flask, request, jsonify
 import requests
 
-# Import corretto dalla tua versione di football_api.py
-from football_api import get_leagues  
+from football_api import get_leagues, get_matches  # import corretto
 from config import TELEGRAM_TOKEN
 
 # -------------------------------
@@ -28,7 +27,6 @@ conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
 db_lock = threading.Lock()
 
-# Creazione tabella utenti (esempio)
 with db_lock:
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -58,23 +56,26 @@ def webhook():
 
         logger.info(f"Ricevuto webhook: {data}")
 
-        # Estrai chat_id e messaggio
         chat_id = data['message']['chat']['id']
         text = data['message'].get('text', '')
 
-        # Salva utente nel DB (se non esiste)
+        # Salva utente
         with db_lock:
             cursor.execute("INSERT OR IGNORE INTO users (chat_id) VALUES (?)", (chat_id,))
             conn.commit()
 
-        # Risposta semplice
+        # Risposta comandi
         if text.lower() == '/start':
-            send_message(chat_id, "Ciao! Bot attivo. Usa /leagues per info sui campionati.")
+            send_message(chat_id, "Ciao! Bot attivo. Usa /leagues o /matches.")
         elif text.lower() == '/leagues':
-            leagues_info = get_leagues()  # funzione dal tuo football_api.py
-            # Formatta un po' il messaggio
+            leagues_info = get_leagues()
             leagues_text = "\n".join([league.get('name', 'N/A') for league in leagues_info.get('response', [])[:10]])
             send_message(chat_id, f"Top 10 leghe:\n{leagues_text}")
+        elif text.lower() == '/matches':
+            matches_info = get_matches()
+            matches_text = "\n".join([f"{m['fixture']['home']['name']} vs {m['fixture']['away']['name']}" 
+                                      for m in matches_info.get('response', [])[:10]])
+            send_message(chat_id, f"Top 10 partite:\n{matches_text}")
         else:
             send_message(chat_id, "Comando non riconosciuto.")
 
