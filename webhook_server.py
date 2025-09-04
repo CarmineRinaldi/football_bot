@@ -1,25 +1,30 @@
 import os
 import sqlite3
 import threading
-from flask import Flask, request, jsonify, abort
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from queue import Queue
+from flask import Flask, request, jsonify
 
 # -------------------------------
 # Config
 # -------------------------------
 DB_FILE = os.environ.get("DB_FILE", "users.db")
+ADMIN_HTTP_TOKEN = os.environ.get("ADMIN_HTTP_TOKEN")
+API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY")
 FREE_MAX_MATCHES = int(os.environ.get("FREE_MAX_MATCHES", 5))
 VIP_MAX_MATCHES = int(os.environ.get("VIP_MAX_MATCHES", 20))
-TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_ENDPOINT_SECRET = os.environ.get("STRIPE_ENDPOINT_SECRET")
 STRIPE_PRICE_2EUR = os.environ.get("STRIPE_PRICE_2EUR")
 STRIPE_PRICE_VIP = os.environ.get("STRIPE_PRICE_VIP")
+TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-import stripe
-stripe.api_key = STRIPE_SECRET_KEY
+# -------------------------------
+# DB Connection
+# -------------------------------
+conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+cursor = conn.cursor()
+db_lock = threading.Lock()
 
 # -------------------------------
 # Flask App
@@ -27,111 +32,58 @@ stripe.api_key = STRIPE_SECRET_KEY
 app = Flask(__name__)
 
 # -------------------------------
-# Database
+# Thread-safe queue
 # -------------------------------
-conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-cursor = conn.cursor()
-db_lock = threading.Lock()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS tickets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    match_data TEXT NOT NULL,
-    is_vip INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-conn.commit()
+update_queue = Queue()
 
 # -------------------------------
-# Telegram Bot
+# Routes
 # -------------------------------
-application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
+@app.route("/")
+def home():
+    return "Bot is running!", 200
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Ciao! Usa /nuova_schedina per creare una schedina e /paga_vip per diventare VIP!")
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.json
+    if not data:
+        return "No data", 400
 
-async def nuova_schedina(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    # Controllo numero di schedine
-    with db_lock:
-        cursor.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND is_vip=0", (user_id,))
-        count_free = cursor.fetchone()[0]
+    # Inserisco nella queue in modo thread-safe
+    update_queue.put(data)
+    return "OK", 200
 
-        cursor.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND is_vip=1", (user_id,))
-        count_vip = cursor.fetchone()[0]
+@app.route("/admin", methods=["POST"])
+def admin():
+    token = request.headers.get("Authorization")
+    if token != f"Bearer {ADMIN_HTTP_TOKEN}":
+        return "Unauthorized", 401
 
-    if count_free >= FREE_MAX_MATCHES:
-        await update.message.reply_text(f"Hai raggiunto il limite FREE ({FREE_MAX_MATCHES}). Diventa VIP per {VIP_MAX_MATCHES} schedine!")
-        return
-
-    # Inserisci nuova schedina
-    match_data = "esempio_match_data"  # Qui puoi prendere input reale dall'utente
-    with db_lock:
-        cursor.execute("INSERT INTO tickets (user_id, match_data) VALUES (?,?)", (user_id, match_data))
-        conn.commit()
-
-    await update.message.reply_text("Schedina creata con successo! ✅")
-
-async def paga_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    try:
-        checkout_session = stripe.checkout.Session.create(
-            line_items=[{
-                'price': STRIPE_PRICE_VIP,
-                'quantity': 1,
-            }],
-            mode='payment',
-            success_url=f"{WEBHOOK_URL}/pagamento_successo",
-            cancel_url=f"{WEBHOOK_URL}/pagamento_errore",
-            metadata={"user_id": str(user_id)}
-        )
-        await update.message.reply_text(f"Procedi al pagamento VIP: {checkout_session.url}")
-    except Exception as e:
-        await update.message.reply_text(f"Errore creazione pagamento: {e}")
-
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("nuova_schedina", nuova_schedina))
-application.add_handler(CommandHandler("paga_vip", paga_vip))
+    return jsonify({"status": "ok"}), 200
 
 # -------------------------------
-# Stripe Webhook
+# Helper per gestire queue
 # -------------------------------
-@app.route("/stripe_webhook", methods=["POST"])
-def stripe_webhook():
-    payload = request.data
-    sig_header = request.headers.get("Stripe-Signature")
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_ENDPOINT_SECRET)
-    except Exception as e:
-        print("Errore webhook:", e)
-        return abort(400)
-    
-    if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
-        user_id = int(session['metadata']['user_id'])
-        with db_lock:
-            cursor.execute("UPDATE tickets SET is_vip=1 WHERE user_id=? AND is_vip=0", (user_id,))
-            conn.commit()
-        print(f"Utente {user_id} diventato VIP!")
+def process_updates():
+    while True:
+        update = update_queue.get()
+        try:
+            handle_update(update)
+        finally:
+            update_queue.task_done()
 
-    return jsonify({"status": "success"})
+def handle_update(update):
+    # Qui va la logica di gestione degli update
+    print("Received update:", update)
+    # Esempio: puoi integrare chiamate API Football o Telegram
 
 # -------------------------------
-# Flask + Telegram
+# Thread per processare gli update
 # -------------------------------
-@app.route("/", methods=["GET"])
-def index():
-    return "Bot online 🚀"
+threading.Thread(target=process_updates, daemon=True).start()
 
+# -------------------------------
+# Main
+# -------------------------------
 if __name__ == "__main__":
-    import nest_asyncio
-    nest_asyncio.apply()
-    from telegram.ext import CommandHandler
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(application.initialize())
-    loop.create_task(application.start())
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
