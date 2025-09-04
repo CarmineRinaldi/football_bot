@@ -137,6 +137,7 @@ application.add_handler(CallbackQueryHandler(button_handler))
 # -------------------------------
 loop = asyncio.get_event_loop()
 loop.run_until_complete(application.initialize())
+loop.run_until_complete(application.start())
 
 # -------------------------------
 # Webhook stabile per Render free
@@ -145,12 +146,15 @@ loop.run_until_complete(application.initialize())
 def webhook():
     data = request.get_json(force=True)
     logger.info(f"Update ricevuto: {data}")
+
     try:
         update = Update.de_json(data, application.bot)
-        asyncio.create_task(application.process_update(update))
+        # schedula l'update nel loop esistente
+        loop.create_task(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
+
     return "ok"
 
 # -------------------------------
