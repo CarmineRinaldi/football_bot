@@ -26,8 +26,8 @@ app = Flask(__name__)
 httpx_request = HTTPXRequest(
     connect_timeout=30,
     read_timeout=30,
-    pool_timeout=30,
-    connection_pool_size=50
+    pool_timeout=60,         # aumentato da 30 a 60
+    connection_pool_size=100  # aumentato da 50 a 100
 )
 
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
@@ -126,8 +126,9 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        # esegui la coroutine nel loop temporaneo
-        asyncio.run(application.process_update(update))
+        # esegui la coroutine usando il loop esistente invece di asyncio.run()
+        loop = asyncio.get_event_loop()
+        loop.create_task(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
