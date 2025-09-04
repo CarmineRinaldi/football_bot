@@ -33,10 +33,7 @@ async def init_db():
 # -------------------------------
 async def add_user(user_id: int):
     async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute(
-            "INSERT OR IGNORE INTO users (user_id, started) VALUES (?, 0)",
-            (user_id,)
-        )
+        await db.execute("INSERT OR IGNORE INTO users (user_id, started) VALUES (?, 0)", (user_id,))
         await db.commit()
 
 async def has_started(user_id: int) -> bool:
@@ -60,10 +57,7 @@ async def get_user(user_id: int) -> dict | None:
 
 async def update_plan(user_id: int, plan: str, pronostici: int):
     async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute(
-            "UPDATE users SET plan=?, pronostici=? WHERE user_id=?",
-            (plan, pronostici, user_id)
-        )
+        await db.execute("UPDATE users SET plan=?, pronostici=? WHERE user_id=?", (plan, pronostici, user_id))
         await db.commit()
 
 async def decrement_pronostico(user_id: int):
@@ -76,10 +70,7 @@ async def decrement_pronostico(user_id: int):
 
 async def add_pronostici(user_id: int, amount: int):
     async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute(
-            "UPDATE users SET pronostici = pronostici + ? WHERE user_id=?",
-            (amount, user_id)
-        )
+        await db.execute("UPDATE users SET pronostici = pronostici + ? WHERE user_id=?", (amount, user_id))
         await db.commit()
 
 # -------------------------------
