@@ -11,9 +11,10 @@ cursor = conn.cursor()
 db_lock = threading.Lock()
 
 # -------------------------------
-# Creazione della tabella utenti
+# Creazione tabelle
 # -------------------------------
 with db_lock:
+    # Tabella utenti
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
@@ -22,10 +23,22 @@ with db_lock:
         started BOOLEAN DEFAULT 0
     )
     """)
+
+    # Tabella schedine
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS schedine (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        campionato TEXT,
+        pronostico TEXT,
+        data_creazione TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(user_id)
+    )
+    """)
     conn.commit()
 
 # -------------------------------
-# Funzioni per gestire gli utenti
+# Funzioni utenti
 # -------------------------------
 
 def add_user(user_id):
@@ -70,3 +83,25 @@ def add_pronostici(user_id, amount):
     with db_lock:
         cursor.execute("UPDATE users SET pronostici = pronostici + ? WHERE user_id=?", (amount, user_id))
         conn.commit()
+
+# -------------------------------
+# Funzioni schedine
+# -------------------------------
+
+def add_schedina(user_id, campionato, pronostico):
+    """Aggiunge una schedina per un utente."""
+    with db_lock:
+        cursor.execute(
+            "INSERT INTO schedine (user_id, campionato, pronostico) VALUES (?, ?, ?)",
+            (user_id, campionato, pronostico)
+        )
+        conn.commit()
+
+def get_schedine(user_id, limit=10):
+    """Recupera le ultime schedine salvate dall'utente."""
+    with db_lock:
+        cursor.execute(
+            "SELECT campionato, pronostico, data_creazione FROM schedine WHERE user_id=? ORDER BY id DESC LIMIT ?",
+            (user_id, limit)
+        )
+        return cursor.fetchall()
