@@ -8,7 +8,6 @@ from football_api import get_pronostico, get_campionati
 from payments import create_checkout_session
 import logging
 import asyncio
-import threading
 import os
 
 # -------------------------------
@@ -35,15 +34,17 @@ httpx_request = HTTPXRequest(
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
 # -------------------------------
-# Loop dedicato al bot
+# Loop globale per Telegram
 # -------------------------------
 bot_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(bot_loop)
 
-def start_bot_loop(loop):
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
+async def init_bot():
+    await application.initialize()
+    await application.start()
+    logger.info("Bot Telegram inizializzato!")
 
-threading.Thread(target=start_bot_loop, args=(bot_loop,), daemon=True).start()
+bot_loop.create_task(init_bot())
 
 # -------------------------------
 # Memorizzazione messaggi per auto-eliminazione
@@ -136,8 +137,8 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        # esegui la coroutine nel loop dedicato al bot
-        asyncio.run_coroutine_threadsafe(application.process_update(update), bot_loop)
+        # schedula la coroutine sul loop globale
+        bot_loop.create_task(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -161,7 +162,7 @@ def set_webhook():
         return await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
 
     try:
-        success = asyncio.get_event_loop().run_until_complete(setup_webhook())
+        success = bot_loop.run_until_complete(setup_webhook())
     except Exception as e:
         logger.exception("Errore impostando il webhook")
         return jsonify({"status": "error", "message": str(e)}), 500
