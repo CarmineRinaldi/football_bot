@@ -3,3 +3,4 @@ requests==2.31.0
 python-telegram-bot==20.4
 aiohttp==3.9.3
 stripe==12.6.0b1
+gunicorn==21.2.0
