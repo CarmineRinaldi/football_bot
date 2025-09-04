@@ -9,6 +9,7 @@ from payments import create_checkout_session
 import logging
 import asyncio
 import os
+import threading   # ✅ AGGIUNTO
 
 # -------------------------------
 # Logging
