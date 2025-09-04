@@ -27,7 +27,7 @@ httpx_request = HTTPXRequest(
     connect_timeout=30,
     read_timeout=30,
     pool_timeout=30,
-    limits={"max_connections": 50, "max_keepalive_connections": 20}
+    connection_pool_size=50
 )
 
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
