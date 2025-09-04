@@ -18,9 +18,6 @@ FREE_MAX_MATCHES = int(os.environ.get("FREE_MAX_MATCHES", 5))
 VIP_MAX_MATCHES = int(os.environ.get("VIP_MAX_MATCHES", 20))
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
-STRIPE_ENDPOINT_SECRET = os.environ.get("STRIPE_ENDPOINT_SECRET")
-
 # -------------------------------
 # Database
 # -------------------------------
@@ -35,6 +32,7 @@ with db_lock:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             ticket_data TEXT NOT NULL,
+            is_vip INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -52,7 +50,11 @@ application = ApplicationBuilder().token(TOKEN).build()
 
 # Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Ciao! Benvenuto nel bot delle schedine.")
+    await update.message.reply_text(
+        "Ciao! Benvenuto nel bot delle schedine.\n"
+        "Usa /aggiungischedina per aggiungere una schedina\n"
+        "Usa /mieschedine per vedere le tue schedine"
+    )
 
 application.add_handler(CommandHandler("start", start))
 
@@ -60,26 +62,65 @@ application.add_handler(CommandHandler("start", start))
 # Utility schedine
 # -------------------------------
 def clean_old_tickets():
-    """Cancella schedine più vecchie di 10 giorni."""
     limit_date = datetime.utcnow() - timedelta(days=10)
     with db_lock:
         cursor.execute("DELETE FROM tickets WHERE created_at < ?", (limit_date,))
         conn.commit()
 
-def add_ticket(user_id: int, ticket_data: str):
-    """Aggiunge una nuova schedina per un utente."""
+def add_ticket(user_id: int, ticket_data: str, is_vip: bool):
     clean_old_tickets()
+    max_matches = VIP_MAX_MATCHES if is_vip else FREE_MAX_MATCHES
+    # Controllo limite
     with db_lock:
-        cursor.execute("INSERT INTO tickets (user_id, ticket_data) VALUES (?, ?)",
-                       (user_id, ticket_data))
+        cursor.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND is_vip=?", (user_id, int(is_vip)))
+        count = cursor.fetchone()[0]
+        if count >= max_matches:
+            return False
+        cursor.execute(
+            "INSERT INTO tickets (user_id, ticket_data, is_vip) VALUES (?, ?, ?)",
+            (user_id, ticket_data, int(is_vip))
+        )
         conn.commit()
+    return True
 
 def get_user_tickets(user_id: int):
-    """Restituisce tutte le schedine dell'utente (max 10 giorni)."""
     clean_old_tickets()
     with db_lock:
-        cursor.execute("SELECT id, ticket_data, created_at FROM tickets WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT id, ticket_data, is_vip, created_at FROM tickets WHERE user_id=?", (user_id,))
         return cursor.fetchall()
+
+# -------------------------------
+# Comandi Telegram schedine
+# -------------------------------
+async def aggiungi_schedina(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    if not context.args:
+        await update.message.reply_text("Usa /aggiungischedina <dati_schedina>")
+        return
+    ticket_data = " ".join(context.args)
+    is_vip = False  # Qui puoi implementare controllo VIP reale se vuoi
+    success = add_ticket(user_id, ticket_data, is_vip)
+    if success:
+        await update.message.reply_text("Schedina aggiunta correttamente!")
+    else:
+        await update.message.reply_text(
+            f"Hai raggiunto il limite massimo di schedine ({VIP_MAX_MATCHES if is_vip else FREE_MAX_MATCHES})"
+        )
+
+async def mie_schedine(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    tickets = get_user_tickets(user_id)
+    if not tickets:
+        await update.message.reply_text("Non hai schedine salvate.")
+        return
+    msg = "Le tue schedine:\n\n"
+    for t in tickets:
+        tipo = "VIP" if t[2] else "FREE"
+        msg += f"{t[1]} ({tipo}) - {t[3]}\n"
+    await update.message.reply_text(msg)
+
+application.add_handler(CommandHandler("aggiungischedina", aggiungi_schedina))
+application.add_handler(CommandHandler("mieschedine", mie_schedine))
 
 # -------------------------------
 # Route webhook Telegram
@@ -90,9 +131,6 @@ def webhook():
     application.update_queue.put(update)
     return "OK"
 
-# -------------------------------
-# Route di test (facoltativa)
-# -------------------------------
 @app.route("/test", methods=["GET"])
 def test():
     return jsonify({"status": "ok"})
