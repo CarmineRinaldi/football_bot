@@ -1,4 +1,6 @@
 import os
+print(os.listdir())
+import os
 import logging
 import sqlite3
 import threading
