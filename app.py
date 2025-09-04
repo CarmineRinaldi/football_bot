@@ -1,12 +1,11 @@
 import os
 print(os.listdir())
-import os
 import logging
 import sqlite3
 import threading
 from flask import Flask, request, jsonify
 import requests
-from footballapi import get_match_data  # import dal tuo footballapi.py
+from football_api import get_match_data  # modificato per corrispondere al tuo file
 from config import TELEGRAM_TOKEN
 
 # -------------------------------
@@ -71,7 +70,7 @@ def webhook():
         if text.lower() == '/start':
             send_message(chat_id, "Ciao! Bot attivo. Usa /match per info partite.")
         elif text.lower() == '/match':
-            match_info = get_match_data()  # funzione dal tuo footballapi.py
+            match_info = get_match_data()  # funzione dal tuo football_api.py
             send_message(chat_id, match_info)
         else:
             send_message(chat_id, "Comando non riconosciuto.")
