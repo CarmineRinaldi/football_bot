@@ -1,3 +1,5 @@
+from database import add_schedina, get_schedine  # importa funzioni DB
+
 # -------------------------------
 # Handlers
 # -------------------------------
@@ -15,10 +17,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Pronostico Free (1 su 3 schedine su 10)", callback_data='free')],
         [InlineKeyboardButton("Compra 10 schedine - 2€", callback_data='buy_10')],
         [InlineKeyboardButton("VIP 4,99€ - Tutti i pronostici", callback_data='vip')],
-        [InlineKeyboardButton("Le mie schedine", callback_data='myschedine')]
+        [InlineKeyboardButton("Le mie schedine 📋", callback_data='myschedine')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await send_message(chat_id, user_id, 'Benvenuto! Scegli il tuo piano:', reply_markup=reply_markup)
+
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -47,17 +50,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_message(chat_id, user_id, f"Abbonamento VIP attivo! Acquista qui: {url}")
 
     elif data == 'myschedine':
-        # TODO: recuperare schedine dell’utente dal DB
-        await send_message(chat_id, user_id, "📋 Le tue schedine:\n- Nessuna schedina disponibile")
+        schedine = get_schedine(user_id)
+        if schedine:
+            text = "📋 Le tue ultime schedine:\n\n"
+            for campionato, pronostico, data_creazione in schedine:
+                text += f"🏆 {campionato} ({data_creazione}):\n➡️ {pronostico}\n\n"
+        else:
+            text = "📋 Non hai ancora schedine salvate."
+        await send_message(chat_id, user_id, text)
 
     elif data.startswith('camp_'):
         campionato = data.split('_', 1)[1]
         pronostico = get_pronostico(user_id, campionato)
+        
+        # Salva la schedina in DB
+        add_schedina(user_id, campionato, pronostico)
+
         await send_message(chat_id, user_id, f"Pronostico per {campionato}:\n{pronostico}")
 
     elif data == 'back':
         # Torna al menu principale
         await start(update, context)
+
 
 async def show_campionati(chat_id, user_id):
     campionati = get_campionati()
