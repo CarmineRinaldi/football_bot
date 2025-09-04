@@ -1,5 +1,6 @@
 import sqlite3
 import threading
+from datetime import datetime, timedelta
 
 DB_FILE = 'users.db'
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -7,53 +8,64 @@ cursor = conn.cursor()
 db_lock = threading.Lock()
 
 # Creazione tabelle
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    started INTEGER DEFAULT 0,
-    pronostici_free INTEGER DEFAULT 5
-)
-""")
+with db_lock:
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        username TEXT,
+        started INTEGER DEFAULT 0
+    )
+    """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS schedine (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        pronostico TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    conn.commit()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS schedine (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    campionato TEXT,
-    schedina TEXT
-)
-""")
-conn.commit()
-
-# ----------------- Funzioni database -----------------
-async def add_user(user_id):
+# Funzioni database
+def add_user(user_id, username):
     with db_lock:
-        cursor.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (user_id,))
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
         conn.commit()
 
-async def has_started(user_id):
+def has_started(user_id):
     with db_lock:
         cursor.execute("SELECT started FROM users WHERE user_id=?", (user_id,))
         row = cursor.fetchone()
-        return row and row[0] == 1
+        return bool(row[0]) if row else False
 
-async def mark_started(user_id):
+def mark_started(user_id):
     with db_lock:
         cursor.execute("UPDATE users SET started=1 WHERE user_id=?", (user_id,))
         conn.commit()
 
-async def decrement_pronostico(user_id):
+def add_pronostico(user_id, pronostico):
     with db_lock:
-        cursor.execute("UPDATE users SET pronostici_free = pronostici_free - 1 WHERE user_id=? AND pronostici_free>0", (user_id,))
+        cursor.execute("INSERT INTO schedine (user_id, pronostico) VALUES (?, ?)", (user_id, pronostico))
         conn.commit()
 
-async def get_schedine(user_id):
+def get_schedine(user_id):
     with db_lock:
-        cursor.execute("SELECT id, schedina FROM schedine WHERE user_id=?", (user_id,))
+        ten_days_ago = datetime.now() - timedelta(days=10)
+        cursor.execute("""
+            SELECT pronostico, created_at 
+            FROM schedine 
+            WHERE user_id=? AND created_at >= ?
+            ORDER BY created_at DESC
+        """, (user_id, ten_days_ago))
         return cursor.fetchall()
 
-async def add_schedina(user_id, campionato, schedina):
+def decrement_pronostico(user_id):
+    # Se serve logica aggiuntiva per decrementare, qui puoi aggiungerla
+    pass
+
+def cleanup_schedine():
+    # Rimuove schedine più vecchie di 10 giorni
     with db_lock:
-        cursor.execute("INSERT INTO schedine(user_id, campionato, schedina) VALUES(?,?,?)",
-                       (user_id, campionato, schedina))
+        ten_days_ago = datetime.now() - timedelta(days=10)
+        cursor.execute("DELETE FROM schedine WHERE created_at < ?", (ten_days_ago,))
         conn.commit()
