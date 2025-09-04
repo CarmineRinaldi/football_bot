@@ -114,7 +114,7 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
 # -------------------------------
-# Webhook endpoint
+# Webhook endpoint aggiornato
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -123,9 +123,8 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        # esegui la coroutine usando il loop esistente invece di asyncio.run()
-        loop = asyncio.get_event_loop()
-        loop.create_task(application.process_update(update))
+        # esegui la coroutine nel loop del bot in modo thread-safe
+        asyncio.run_coroutine_threadsafe(application.process_update(update), application.bot.loop)
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
