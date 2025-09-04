@@ -28,13 +28,26 @@ httpx_request = HTTPXRequest(connect_timeout=30, read_timeout=30, pool_timeout=1
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
 # -------------------------------
-# Helper per invio messaggi
+# Memoria messaggi da eliminare
 # -------------------------------
-async def send_message(chat_id, text, reply_markup=None):
+last_message = {}  # user_id -> message_id
+
+async def send_message(chat_id, user_id, text, reply_markup=None):
+    """Invia un messaggio e memorizza l'ID per poterlo eliminare dopo."""
     try:
-        await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        last_message[user_id] = msg.message_id
     except Exception as e:
         logger.warning(f"Errore inviando messaggio: {e}")
+
+async def delete_last_message(chat_id, user_id):
+    """Elimina l'ultimo messaggio dell'utente se esiste."""
+    if user_id in last_message:
+        try:
+            await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
+            del last_message[user_id]
+        except Exception as e:
+            logger.warning(f"Errore eliminando messaggio: {e}")
 
 # -------------------------------
 # Handlers
@@ -55,7 +68,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("VIP 4,99€ - Tutti i pronostici", callback_data='vip')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await send_message(chat_id, 'Benvenuto! Scegli il tuo piano:', reply_markup=reply_markup)
+    await send_message(chat_id, user_id, 'Benvenuto! Scegli il tuo piano:', reply_markup=reply_markup)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -68,25 +81,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.message.chat.id
     data = query.data
 
+    # Elimina subito il messaggio con i pulsanti
+    await delete_last_message(chat_id, user_id)
+
     if data == 'free':
         decrement_pronostico(user_id)
         await show_campionati(chat_id, user_id)
     elif data == 'buy_10':
         url = create_checkout_session(user_id, price_id="price_2euro_10pronostici")
-        await send_message(chat_id, f"Acquista qui: {url}")
+        await send_message(chat_id, user_id, f"Acquista qui: {url}")
     elif data == 'vip':
         url = create_checkout_session(user_id, price_id="price_vip_10al_giorno")
-        await send_message(chat_id, f"Abbonamento VIP attivo! Acquista qui: {url}")
+        await send_message(chat_id, user_id, f"Abbonamento VIP attivo! Acquista qui: {url}")
     elif data.startswith('camp_'):
         campionato = data.split('_', 1)[1]
         pronostico = get_pronostico(user_id, campionato)
-        await send_message(chat_id, f"Pronostico per {campionato}:\n{pronostico}")
+        await send_message(chat_id, user_id, f"Pronostico per {campionato}:\n{pronostico}")
 
 async def show_campionati(chat_id, user_id):
     campionati = get_campionati()
     keyboard = [[InlineKeyboardButton(c, callback_data=f'camp_{c}')] for c in campionati]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await send_message(chat_id, "Scegli il campionato:", reply_markup=reply_markup)
+    await send_message(chat_id, user_id, "Scegli il campionato:", reply_markup=reply_markup)
 
 # -------------------------------
 # Aggiunta handlers
