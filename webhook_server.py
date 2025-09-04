@@ -8,6 +8,8 @@ from football_api import get_pronostico, get_campionati
 from payments import create_checkout_session
 import logging
 import asyncio
+import threading
+import os
 
 # -------------------------------
 # Logging
@@ -31,6 +33,17 @@ httpx_request = HTTPXRequest(
 )
 
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
+
+# -------------------------------
+# Loop dedicato al bot
+# -------------------------------
+bot_loop = asyncio.new_event_loop()
+
+def start_bot_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+threading.Thread(target=start_bot_loop, args=(bot_loop,), daemon=True).start()
 
 # -------------------------------
 # Memorizzazione messaggi per auto-eliminazione
@@ -123,8 +136,8 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        loop = asyncio.get_running_loop()  # prende il loop corrente
-        asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
+        # esegui la coroutine nel loop dedicato al bot
+        asyncio.run_coroutine_threadsafe(application.process_update(update), bot_loop)
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -161,8 +174,6 @@ def set_webhook():
 # -------------------------------
 # Avvio Flask (solo debug locale)
 # -------------------------------
-import os
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))  # Render assegna PORT, fallback 5000
     app.run(host="0.0.0.0", port=port)
