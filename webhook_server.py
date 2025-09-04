@@ -118,15 +118,14 @@ application.add_handler(CallbackQueryHandler(button_handler))
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Riceve update da Telegram e li processa nel loop corretto."""
     data = request.get_json(force=True)
-    update = Update.de_json(data, application.bot)
+    logger.info(f"Update ricevuto: {data}")
 
-    # invia il task al loop di telegram
-    future = asyncio.run_coroutine_threadsafe(
-        application.process_update(update), application.bot.loop
-    )
     try:
+        update = Update.de_json(data, application.bot)
+        future = asyncio.run_coroutine_threadsafe(
+            application.process_update(update), application.loop
+        )
         future.result(timeout=5)
     except Exception as e:
         logger.exception("Errore processando update")
