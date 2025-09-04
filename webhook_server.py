@@ -32,13 +32,6 @@ httpx_request = HTTPXRequest(
 
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
-# Inizializza bot
-async def init_bot():
-    await application.initialize()
-    await application.start()
-
-asyncio.run(init_bot())
-
 # -------------------------------
 # Memorizzazione messaggi per auto-eliminazione
 # -------------------------------
@@ -169,5 +162,8 @@ def set_webhook():
 # -------------------------------
 # Avvio Flask (solo debug locale)
 # -------------------------------
+import os
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))  # usa la porta di Render, fallback a 5000
+    app.run(host="0.0.0.0", port=port)
