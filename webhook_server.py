@@ -137,7 +137,6 @@ application.add_handler(CallbackQueryHandler(button_handler))
 # -------------------------------
 loop = asyncio.get_event_loop()
 loop.run_until_complete(application.initialize())
-loop.run_until_complete(application.start())
 
 # -------------------------------
 # Webhook stabile per Render free
