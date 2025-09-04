@@ -9,7 +9,6 @@ from payments import create_checkout_session
 import logging
 import asyncio
 import os
-import threading   # ✅ AGGIUNTO
 
 # -------------------------------
 # Logging
@@ -49,7 +48,6 @@ async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
 # Helper tastiere
 # -------------------------------
 def make_keyboard(options, add_back=True):
-    """Crea tastiera InlineKeyboard con opzioni e tasto '⬅️ Indietro'"""
     keyboard = [[InlineKeyboardButton(text, callback_data=data)] for text, data in options]
     if add_back:
         keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data="back")])
@@ -92,7 +90,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.message.chat.id
     data = query.data
 
-    # Visualizza caricamento rapido
     await send_with_delete_previous(user_id, chat_id, "⏳ Caricamento...", reply_markup=None)
 
     if data == 'free':
@@ -113,15 +110,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = "📋 Le tue schedine:\n" + "\n\n".join([f"{i+1}) {s[1]}" for i, s in enumerate(schedine)])
         else:
             text = "📋 Le tue schedine:\n- Nessuna schedina disponibile 🤷‍♂️"
-        options = [("⬅️ Indietro", "back")]
-        reply_markup = make_keyboard(options, add_back=False)
+        reply_markup = make_keyboard([("⬅️ Indietro", "back")], add_back=False)
         await send_with_delete_previous(user_id, chat_id, text, reply_markup=reply_markup)
 
     elif data.startswith('camp_'):
         campionato = data.split('_', 1)[1]
         pronostico = get_pronostico(user_id, campionato)
-        options = [("⬅️ Indietro", "back")]
-        reply_markup = make_keyboard(options, add_back=False)
+        reply_markup = make_keyboard([("⬅️ Indietro", "back")], add_back=False)
         await send_with_delete_previous(user_id, chat_id, f"📊 Pronostico per {campionato}:\n{pronostico}", reply_markup=reply_markup)
 
     elif data == 'back':
@@ -134,20 +129,7 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
 # -------------------------------
-# Inizializza Application in un loop separato
-# -------------------------------
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-
-def start_app():
-    loop.run_until_complete(application.initialize())
-    loop.run_until_complete(application.start())
-    loop.run_forever()
-
-threading.Thread(target=start_app, daemon=True).start()
-
-# -------------------------------
-# Webhook stabile per Render free
+# Webhook stabile per Render
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -156,7 +138,7 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
+        asyncio.run(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -181,7 +163,7 @@ def set_webhook():
         return success
 
     try:
-        success = loop.run_until_complete(setup_webhook())
+        success = asyncio.run(setup_webhook())
     except Exception as e:
         logger.exception("Errore impostando il webhook")
         return jsonify({"status": "error", "message": str(e)}), 500
