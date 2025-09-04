@@ -53,14 +53,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    if has_started(user_id):
-        return
-
-    add_user(user_id)
-    mark_started(user_id)
+    if not has_started(user_id):
+        add_user(user_id)
+        mark_started(user_id)
 
     keyboard = [
-        [InlineKeyboardButton("Pronostico Free (1 su 3 schedine su 10)", callback_data='free')],
+        [InlineKeyboardButton("Pronostico Free (5 schedine)", callback_data='free')],
         [InlineKeyboardButton("Compra 10 schedine - 2€", callback_data='buy_10')],
         [InlineKeyboardButton("VIP 4,99€ - Tutti i pronostici", callback_data='vip')],
         [InlineKeyboardButton("📋 Le mie schedine", callback_data='myschedine')]
@@ -97,7 +95,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'myschedine':
         schedine = get_schedine(user_id)
         if schedine:
-            text = "📋 Le tue schedine:\n" + "\n".join([f"- {s}" for s in schedine])
+            text = "📋 Le tue schedine:\n" + "\n\n".join([f"{i+1}) {s[1]}" for i, s in enumerate(schedine)])
         else:
             text = "📋 Le tue schedine:\n- Nessuna schedina disponibile"
         await send_message(chat_id, user_id, text)
@@ -113,6 +111,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_campionati(chat_id, user_id):
     campionati = get_campionati()
     keyboard = [[InlineKeyboardButton(c, callback_data=f'camp_{c}')] for c in campionati]
+    # Aggiungi pulsante "Indietro"
     keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data="back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await send_message(chat_id, user_id, "⚽ Scegli il campionato:", reply_markup=reply_markup)
