@@ -30,15 +30,23 @@ httpx_request = HTTPXRequest(connect_timeout=30, read_timeout=30, pool_timeout=6
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
 # -------------------------------
+# Loop globale per creare task
+# -------------------------------
+loop = asyncio.get_event_loop()
+
+# -------------------------------
+# Inizializza l'application una volta sola
+# -------------------------------
+loop.run_until_complete(application.initialize())
+
+# -------------------------------
 # Funzioni utili
 # -------------------------------
 async def send_message(chat_id, user_id, text, reply_markup=None):
-    """Invia un messaggio e lo salva come ultimo inviato all’utente."""
     msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
     application.bot_data[f"last_message_{user_id}"] = msg.message_id
 
 async def delete_last_message(chat_id, user_id):
-    """Elimina l’ultimo messaggio inviato all’utente (se esiste)."""
     last_msg_id = application.bot_data.get(f"last_message_{user_id}")
     if last_msg_id:
         try:
@@ -77,10 +85,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.message.chat.id
     data = query.data
 
-    # Elimina il messaggio precedente
     await delete_last_message(chat_id, user_id)
 
-    # Gestione pulsanti
     if data == 'free':
         decrement_pronostico(user_id)
         await show_campionati(chat_id, user_id)
@@ -112,7 +118,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_campionati(chat_id, user_id):
     campionati = get_campionati()
     keyboard = [[InlineKeyboardButton(c, callback_data=f'camp_{c}')] for c in campionati]
-    # Pulsante "Indietro" sempre presente
     keyboard.append([InlineKeyboardButton("⬅️ Torna al menu principale", callback_data="back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await send_message(chat_id, user_id, "⚽ Scegli il campionato che ti fa battere il cuore (o il portafoglio! 😉)", reply_markup=reply_markup)
@@ -131,15 +136,9 @@ def webhook():
     data = request.get_json(force=True)
     logger.info(f"Update ricevuto: {data}")
 
-    async def process_update():
-        update = Update.de_json(data, application.bot)
-        await application.process_update(update)
-
-    try:
-        asyncio.run(process_update())
-    except Exception as e:
-        logger.exception("Errore processando update")
-        return jsonify({"status": "error", "message": str(e)}), 500
+    update = Update.de_json(data, application.bot)
+    # Crea task nel loop globale senza bloccare Flask
+    asyncio.create_task(application.process_update(update))
 
     return "ok"
 
@@ -157,10 +156,9 @@ def index():
 def set_webhook():
     async def setup_webhook():
         await application.bot.delete_webhook()
-        success = await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
-        return success
+        return await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
 
-    if asyncio.run(setup_webhook()):
+    if loop.run_until_complete(setup_webhook()):
         return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
     else:
         return jsonify({"status": "error", "message": "Errore impostando il webhook"}), 500
