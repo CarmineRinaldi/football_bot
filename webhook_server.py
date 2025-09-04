@@ -26,14 +26,18 @@ app = Flask(__name__)
 httpx_request = HTTPXRequest(
     connect_timeout=30,
     read_timeout=30,
-    pool_timeout=60,         # aumentato da 30 a 60
-    connection_pool_size=100  # aumentato da 50 a 100
+    pool_timeout=120,          # aumenta a 2 minuti
+    connection_pool_size=200    # più connessioni simultanee
 )
 
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
 # Inizializza bot
-asyncio.get_event_loop().run_until_complete(application.initialize())
+async def init_bot():
+    await application.initialize()
+    await application.start()
+
+asyncio.run(init_bot())
 
 # -------------------------------
 # Memorizzazione messaggi per auto-eliminazione
