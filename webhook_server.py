@@ -3,6 +3,7 @@ import sqlite3
 import threading
 from queue import Queue
 from flask import Flask, request, jsonify
+import stripe
 
 # -------------------------------
 # Config
@@ -19,6 +20,8 @@ STRIPE_PRICE_VIP = os.environ.get("STRIPE_PRICE_VIP")
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
+stripe.api_key = STRIPE_SECRET_KEY
+
 # -------------------------------
 # DB Connection
 # -------------------------------
@@ -30,10 +33,6 @@ db_lock = threading.Lock()
 # Flask App
 # -------------------------------
 app = Flask(__name__)
-
-# -------------------------------
-# Thread-safe queue
-# -------------------------------
 update_queue = Queue()
 
 # -------------------------------
@@ -49,7 +48,6 @@ def webhook():
     if not data:
         return "No data", 400
 
-    # Inserisco nella queue in modo thread-safe
     update_queue.put(data)
     return "OK", 200
 
@@ -62,7 +60,37 @@ def admin():
     return jsonify({"status": "ok"}), 200
 
 # -------------------------------
-# Helper per gestire queue
+# Stripe webhook
+# -------------------------------
+@app.route("/stripe_webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get("Stripe-Signature")
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_ENDPOINT_SECRET
+        )
+    except ValueError:
+        return "Invalid payload", 400
+    except stripe.error.SignatureVerificationError:
+        return "Invalid signature", 400
+
+    # Esempio: gestione pagamenti
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        handle_payment(session)
+
+    return "OK", 200
+
+def handle_payment(session):
+    customer_email = session.get("customer_email")
+    price_id = session.get("line_items", [{}])[0].get("price", "")
+    print(f"Payment received: {customer_email}, price: {price_id}")
+    # Aggiorna DB o invia messaggio Telegram
+
+# -------------------------------
+# Queue processing
 # -------------------------------
 def process_updates():
     while True:
@@ -73,13 +101,9 @@ def process_updates():
             update_queue.task_done()
 
 def handle_update(update):
-    # Qui va la logica di gestione degli update
     print("Received update:", update)
-    # Esempio: puoi integrare chiamate API Football o Telegram
+    # Inserisci qui la logica per API Football o Telegram
 
-# -------------------------------
-# Thread per processare gli update
-# -------------------------------
 threading.Thread(target=process_updates, daemon=True).start()
 
 # -------------------------------
