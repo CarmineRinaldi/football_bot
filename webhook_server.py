@@ -165,5 +165,5 @@ def set_webhook():
 import os
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # usa la porta di Render, fallback a 5000
+    port = int(os.environ.get("PORT", 5000))  # Render assegna PORT, fallback 5000
     app.run(host="0.0.0.0", port=port)
