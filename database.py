@@ -1,182 +1,111 @@
-from flask import Flask, request, jsonify
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram.request import HTTPXRequest
-from config import TG_BOT_TOKEN, WEBHOOK_URL
-from database import add_user, decrement_pronostico, has_started, mark_started, get_schedine
-from football_api import get_pronostico, get_campionati
-from payments import create_checkout_session
-import logging
-import asyncio
-import os
+import sqlite3
+import threading
 
 # -------------------------------
-# Logging
+# Connessione al database SQLite
 # -------------------------------
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+DB_FILE = 'users.db'  # puoi anche usare os.environ.get("DB_FILE")
+conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+conn.row_factory = sqlite3.Row  # rende i risultati come dizionari
+cursor = conn.cursor()
 
-# -------------------------------
-# Flask
-# -------------------------------
-app = Flask(__name__)
-
-# -------------------------------
-# Telegram Application con pool ottimizzato
-# -------------------------------
-httpx_request = HTTPXRequest(connect_timeout=30, read_timeout=30, pool_timeout=120, connection_pool_size=20)
-application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
+# Lock per accesso thread-safe al database
+db_lock = threading.Lock()
 
 # -------------------------------
-# Memorizzazione messaggi per auto-eliminazione
+# Creazione tabelle
 # -------------------------------
-last_message = {}  # user_id -> message_id
+with db_lock:
+    # Tabella utenti
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        plan TEXT DEFAULT 'free',
+        pronostici INT DEFAULT 0,
+        started BOOLEAN DEFAULT 0
+    )
+    """)
 
-async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
-    """Invia un messaggio eliminando il precedente dell'utente."""
-    if user_id in last_message:
-        try:
-            await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-        except Exception as e:
-            logger.warning(f"Impossibile eliminare messaggio precedente: {e}")
-
-    msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
-    last_message[user_id] = msg.message_id
-    return msg
-
-# -------------------------------
-# Helper tastiere
-# -------------------------------
-def make_keyboard(options, add_back=True):
-    keyboard = [[InlineKeyboardButton(text, callback_data=data)] for text, data in options]
-    if add_back:
-        keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data="back")])
-    return InlineKeyboardMarkup(keyboard)
-
-async def show_campionati(user_id, chat_id):
-    campionati = get_campionati()
-    options = [(c, f'camp_{c}') for c in campionati]
-    reply_markup = make_keyboard(options)
-    await send_with_delete_previous(user_id, chat_id, "⚽ Scegli il campionato (non sbagliare 😎):", reply_markup=reply_markup)
+    # Tabella schedine
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS schedine (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        campionato TEXT,
+        pronostico TEXT,
+        data_creazione TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(user_id)
+    )
+    """)
+    conn.commit()
 
 # -------------------------------
-# Handlers
+# Funzioni utenti
 # -------------------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
 
-    if not has_started(user_id):
-        add_user(user_id)
-        mark_started(user_id)
+def add_user(user_id):
+    """Aggiunge un utente se non esiste ancora."""
+    with db_lock:
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, started) VALUES (?, 0)", (user_id,))
+        conn.commit()
 
-    options = [
-        ("🎯 Pronostico Free (5 schedine)", 'free'),
-        ("💸 Compra 10 schedine - 2€", 'buy_10'),
-        ("🌟 VIP 4,99€ - Tutti i pronostici", 'vip'),
-        ("📋 Le mie schedine", 'myschedine')
-    ]
-    reply_markup = make_keyboard(options, add_back=False)
-    await send_with_delete_previous(user_id, chat_id, "👋 Benvenuto campione! Scegli il tuo piano o esplora le tue schedine:", reply_markup=reply_markup)
+def has_started(user_id):
+    """Verifica se l'utente ha già cliccato /start."""
+    with db_lock:
+        cursor.execute("SELECT started FROM users WHERE user_id=?", (user_id,))
+        result = cursor.fetchone()
+        return bool(result["started"]) if result else False
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    try:
-        await query.answer()
-    except Exception as e:
-        logger.warning(f"Callback già risposto o fallito: {e}")
+def mark_started(user_id):
+    """Segna che l'utente ha già cliccato /start."""
+    with db_lock:
+        cursor.execute("UPDATE users SET started=1 WHERE user_id=?", (user_id,))
+        conn.commit()
 
-    user_id = query.from_user.id
-    chat_id = query.message.chat.id
-    data = query.data
+def get_user(user_id):
+    """Restituisce tutti i dati dell'utente come dizionario."""
+    with db_lock:
+        cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
-    await send_with_delete_previous(user_id, chat_id, "⏳ Caricamento...", reply_markup=None)
+def update_plan(user_id, plan, pronostici):
+    """Aggiorna il piano e i pronostici dell'utente."""
+    with db_lock:
+        cursor.execute("UPDATE users SET plan=?, pronostici=? WHERE user_id=?", (plan, pronostici, user_id))
+        conn.commit()
 
-    if data == 'free':
-        decrement_pronostico(user_id)
-        await show_campionati(user_id, chat_id)
+def decrement_pronostico(user_id):
+    """Decrementa di 1 i pronostici dell'utente, evitando valori negativi."""
+    with db_lock:
+        cursor.execute("UPDATE users SET pronostici = CASE WHEN pronostici>0 THEN pronostici-1 ELSE 0 END WHERE user_id=?", (user_id,))
+        conn.commit()
 
-    elif data == 'buy_10':
-        url = create_checkout_session(user_id, price_id="price_2euro_10pronostici")
-        await send_with_delete_previous(user_id, chat_id, f"🛒 Acquista qui: {url}")
-
-    elif data == 'vip':
-        url = create_checkout_session(user_id, price_id="price_vip_10al_giorno")
-        await send_with_delete_previous(user_id, chat_id, f"🌟 VIP! Acquista qui: {url}")
-
-    elif data == 'myschedine':
-        schedine = get_schedine(user_id)
-        if schedine:
-            text = "📋 Le tue schedine:\n" + "\n\n".join([f"{i+1}) {s[1]}" for i, s in enumerate(schedine)])
-        else:
-            text = "📋 Le tue schedine:\n- Nessuna schedina disponibile 🤷‍♂️"
-        reply_markup = make_keyboard([("⬅️ Indietro", "back")], add_back=False)
-        await send_with_delete_previous(user_id, chat_id, text, reply_markup=reply_markup)
-
-    elif data.startswith('camp_'):
-        campionato = data.split('_', 1)[1]
-        pronostico = get_pronostico(user_id, campionato)
-        reply_markup = make_keyboard([("⬅️ Indietro", "back")], add_back=False)
-        await send_with_delete_previous(user_id, chat_id, f"📊 Pronostico per {campionato}:\n{pronostico}", reply_markup=reply_markup)
-
-    elif data == 'back':
-        await start(update, context)
+def add_pronostici(user_id, amount):
+    """Aggiunge un numero di pronostici all'utente."""
+    with db_lock:
+        cursor.execute("UPDATE users SET pronostici = pronostici + ? WHERE user_id=?", (amount, user_id))
+        conn.commit()
 
 # -------------------------------
-# Registrazione Handlers
+# Funzioni schedine
 # -------------------------------
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(button_handler))
 
-# -------------------------------
-# Webhook stabile per Render
-# -------------------------------
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json(force=True)
-    logger.info(f"Update ricevuto: {data}")
+def add_schedina(user_id, campionato, pronostico):
+    """Aggiunge una schedina per un utente."""
+    with db_lock:
+        cursor.execute(
+            "INSERT INTO schedine (user_id, campionato, pronostico) VALUES (?, ?, ?)",
+            (user_id, campionato, pronostico)
+        )
+        conn.commit()
 
-    try:
-        update = Update.de_json(data, application.bot)
-        # 🟢 Usa create_task invece di asyncio.run
-        asyncio.create_task(application.process_update(update))
-    except Exception as e:
-        logger.exception("Errore processando update")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-    return "ok"
-
-# -------------------------------
-# Endpoint debug
-# -------------------------------
-@app.route("/", methods=["GET"])
-def index():
-    return "✅ Bot Telegram attivo!"
-
-# -------------------------------
-# Impostazione webhook manuale
-# -------------------------------
-@app.route("/set_webhook", methods=["GET"])
-def set_webhook():
-    async def setup_webhook():
-        await application.bot.delete_webhook()
-        success = await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
-        return success
-
-    try:
-        success = asyncio.run(setup_webhook())
-    except Exception as e:
-        logger.exception("Errore impostando il webhook")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-    if success:
-        return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
-    else:
-        return jsonify({"status": "error", "message": "Errore nell'impostazione del webhook"}), 500
-
-# -------------------------------
-# Avvio Flask
-# -------------------------------
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+def get_schedine(user_id, limit=10):
+    """Recupera le ultime schedine salvate dall'utente."""
+    with db_lock:
+        cursor.execute(
+            "SELECT campionato, pronostico, data_creazione FROM schedine WHERE user_id=? ORDER BY id DESC LIMIT ?",
+            (user_id, limit)
+        )
+        rows = cursor.fetchall()
+        return [(r["campionato"], r["pronostico"], r["data_creazione"]) for r in rows]
