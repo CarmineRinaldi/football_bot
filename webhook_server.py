@@ -123,7 +123,8 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        asyncio.create_task(application.process_update(update))
+        # esegui la coroutine nel loop temporaneo
+        asyncio.run(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
