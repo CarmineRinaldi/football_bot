@@ -123,8 +123,8 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        # esegui la coroutine nel loop del bot in modo thread-safe
-        asyncio.run_coroutine_threadsafe(application.process_update(update), application.bot.loop)
+        loop = asyncio.get_running_loop()  # prende il loop corrente
+        asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
