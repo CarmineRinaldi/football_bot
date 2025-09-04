@@ -139,7 +139,7 @@ loop = asyncio.get_event_loop()
 loop.run_until_complete(application.initialize())
 
 # -------------------------------
-# Webhook endpoint
+# Webhook endpoint stabile per server come Render
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -148,7 +148,8 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        asyncio.run_coroutine_threadsafe(application.process_update(update), application._loop)
+        # schedula l'update nel loop già esistente senza bloccare Flask
+        asyncio.create_task(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
