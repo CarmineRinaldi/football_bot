@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.request import HTTPXRequest
 from config import TG_BOT_TOKEN, WEBHOOK_URL
 from database import add_user, decrement_pronostico, has_started
 from football_api import get_pronostico, get_campionati
@@ -22,14 +23,14 @@ app = Flask(__name__)
 # -------------------------------
 # Application Telegram con pool e timeout
 # -------------------------------
-request_kwargs = {
-    "connect_timeout": 30,
-    "read_timeout": 30,
-    "pool_timeout": 30,
-    "connection_pool_size": 50,
-}
+httpx_request = HTTPXRequest(
+    connect_timeout=30,
+    read_timeout=30,
+    pool_timeout=30,
+    limits={"max_connections": 50, "max_keepalive_connections": 20}
+)
 
-application = ApplicationBuilder().token(TG_BOT_TOKEN).request_kwargs(request_kwargs).build()
+application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
 # Inizializza bot
 asyncio.get_event_loop().run_until_complete(application.initialize())
@@ -126,7 +127,7 @@ def webhook():
         application.process_update(update), application.bot.loop
     )
     try:
-        future.result(timeout=5)  # cattura subito eventuali errori
+        future.result(timeout=5)
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
