@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # -------------------------------
-# Telegram Application
+# Telegram Application con pool ottimizzato
 # -------------------------------
-httpx_request = HTTPXRequest(connect_timeout=30, read_timeout=30, pool_timeout=120, connection_pool_size=50)
+httpx_request = HTTPXRequest(connect_timeout=30, read_timeout=30, pool_timeout=120, connection_pool_size=20)
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
 # -------------------------------
@@ -45,10 +45,10 @@ async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
     return msg
 
 # -------------------------------
-# Funzioni helper
+# Helper tastiere
 # -------------------------------
 def make_keyboard(options, add_back=True):
-    """Crea una tastiera InlineKeyboard con opzioni e tasto '⬅️ Indietro'"""
+    """Crea tastiera InlineKeyboard con opzioni e tasto '⬅️ Indietro'"""
     keyboard = [[InlineKeyboardButton(text, callback_data=data)] for text, data in options]
     if add_back:
         keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data="back")])
@@ -91,7 +91,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.message.chat.id
     data = query.data
 
-    # Elimina il messaggio precedente
+    # Visualizza caricamento rapido
     await send_with_delete_previous(user_id, chat_id, "⏳ Caricamento...", reply_markup=None)
 
     if data == 'free':
@@ -137,23 +137,21 @@ application.add_handler(CallbackQueryHandler(button_handler))
 # -------------------------------
 loop = asyncio.get_event_loop()
 loop.run_until_complete(application.initialize())
+loop.run_until_complete(application.start())
 
 # -------------------------------
-# Webhook endpoint stabile per server come Render
+# Webhook stabile per Render free
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
     logger.info(f"Update ricevuto: {data}")
-
     try:
         update = Update.de_json(data, application.bot)
-        # schedula l'update nel loop già esistente senza bloccare Flask
         asyncio.create_task(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
-
     return "ok"
 
 # -------------------------------
@@ -174,7 +172,7 @@ def set_webhook():
         return success
 
     try:
-        success = asyncio.get_event_loop().run_until_complete(setup_webhook())
+        success = loop.run_until_complete(setup_webhook())
     except Exception as e:
         logger.exception("Errore impostando il webhook")
         return jsonify({"status": "error", "message": str(e)}), 500
