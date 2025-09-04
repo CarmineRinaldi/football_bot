@@ -16,8 +16,9 @@ DB_FILE = os.environ.get("DB_FILE", "users.db")
 # -------------------------------
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_ENDPOINT_SECRET = os.environ.get("STRIPE_ENDPOINT_SECRET")
-STRIPE_PRICE_2EUR = os.environ.get("STRIPE_PRICE_2EUR")
-STRIPE_PRICE_VIP = os.environ.get("STRIPE_PRICE_VIP")
+# ID dei prezzi Stripe per i piani
+STRIPE_PRICE_2EUR = os.environ.get("STRIPE_PRICE_2EUR")  # es: 'price_2euro_10pronostici'
+STRIPE_PRICE_VIP = os.environ.get("STRIPE_PRICE_VIP")    # es: 'price_vip_10al_giorno'
 
 # -------------------------------
 # Football API
