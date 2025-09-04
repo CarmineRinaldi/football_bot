@@ -9,11 +9,19 @@ from payments import create_checkout_session
 import logging
 import asyncio
 import os
+from telegram.error import BadRequest
 
 # -------------------------------
 # Logging
 # -------------------------------
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # -------------------------------
@@ -37,8 +45,9 @@ async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
     if user_id in last_message:
         try:
             await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-        except Exception as e:
-            logger.warning(f"Impossibile eliminare messaggio precedente: {e}")
+        except BadRequest as e:
+            if "message to delete not found" not in str(e):
+                logger.warning(f"Impossibile eliminare messaggio precedente: {e}")
 
     msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
     last_message[user_id] = msg.message_id
@@ -63,6 +72,7 @@ async def show_campionati(user_id, chat_id):
 # Handlers
 # -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler comando /start"""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
@@ -80,6 +90,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_with_delete_previous(user_id, chat_id, "👋 Benvenuto campione! Scegli il tuo piano o esplora le tue schedine:", reply_markup=reply_markup)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler per tutti i callback button"""
     query = update.callback_query
     try:
         await query.answer()
@@ -120,7 +131,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_with_delete_previous(user_id, chat_id, f"📊 Pronostico per {campionato}:\n{pronostico}", reply_markup=reply_markup)
 
     elif data == 'back':
-        await start(update, context)
+        # Creiamo un update fittizio per start
+        fake_update = Update(update.update_id, message=query.message)
+        await start(fake_update, context)
 
 # -------------------------------
 # Registrazione Handlers
@@ -138,7 +151,6 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        # 🟢 Usa create_task invece di asyncio.run
         asyncio.create_task(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update")
@@ -160,19 +172,10 @@ def index():
 def set_webhook():
     async def setup_webhook():
         await application.bot.delete_webhook()
-        success = await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
-        return success
+        return await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
 
-    try:
-        success = asyncio.run(setup_webhook())
-    except Exception as e:
-        logger.exception("Errore impostando il webhook")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-    if success:
-        return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
-    else:
-        return jsonify({"status": "error", "message": "Errore nell'impostazione del webhook"}), 500
+    asyncio.create_task(setup_webhook())
+    return jsonify({"status": "ok", "message": "Webhook impostato correttamente! (task in esecuzione)"})
 
 # -------------------------------
 # Avvio Flask
