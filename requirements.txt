@@ -1,4 +1,5 @@
 Flask==3.1.2
+requests==2.31.0
+python-telegram-bot==20.4
 aiohttp==3.9.3
-stripe==12.5.0
-gunicorn==23.0.0
+stripe==12.10.0
