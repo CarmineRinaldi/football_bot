@@ -3,3 +3,5 @@ requests
 stripe
 Flask
 gunicorn
+nest-asyncio
+python-dotenv
