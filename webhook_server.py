@@ -10,23 +10,35 @@ import logging
 import asyncio
 import os
 
+# -------------------------------
 # Logging
+# -------------------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Flask
+# -------------------------------
+# Flask app
+# -------------------------------
 app = Flask(__name__)
 
+# -------------------------------
 # Telegram Application
+# -------------------------------
 httpx_request = HTTPXRequest(connect_timeout=30, read_timeout=30, pool_timeout=120, connection_pool_size=200)
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
 # -------------------------------
-# Handlers
+# Helper per invio messaggi
 # -------------------------------
 async def send_message(chat_id, text, reply_markup=None):
-    await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    try:
+        await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    except Exception as e:
+        logger.warning(f"Errore inviando messaggio: {e}")
 
+# -------------------------------
+# Handlers
+# -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -47,7 +59,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception as e:
+        logger.warning(f"Callback già risposto o fallito: {e}")
 
     user_id = query.from_user.id
     chat_id = query.message.chat.id
@@ -73,7 +88,9 @@ async def show_campionati(chat_id, user_id):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await send_message(chat_id, "Scegli il campionato:", reply_markup=reply_markup)
 
-# Aggiunta handler
+# -------------------------------
+# Aggiunta handlers
+# -------------------------------
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
@@ -87,19 +104,23 @@ def webhook():
 
     async def process_update():
         update = Update.de_json(data, application.bot)
-        await application.initialize()  # <--- inizializza prima di process_update
+        await application.initialize()
         await application.process_update(update)
-        await application.shutdown()    # <--- chiude risorse subito dopo
+        await application.shutdown()
 
     asyncio.run(process_update())
     return "ok"
 
-# Endpoint debug
+# -------------------------------
+# Debug endpoint
+# -------------------------------
 @app.route("/", methods=["GET"])
 def index():
     return "Bot Telegram attivo!"
 
+# -------------------------------
 # Impostazione webhook
+# -------------------------------
 @app.route("/set_webhook", methods=["GET"])
 def set_webhook():
     async def setup_webhook():
@@ -114,7 +135,9 @@ def set_webhook():
     else:
         return jsonify({"status": "error", "message": "Errore impostando il webhook"}), 500
 
+# -------------------------------
 # Avvio Flask
+# -------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
