@@ -45,8 +45,8 @@ async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
     if user_id in last_message:
         try:
             await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-        except:
-            pass  # ignora errori se messaggio già cancellato
+        except Exception as e:
+            logger.warning(f"Impossibile eliminare messaggio precedente: {e}")
 
     msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
     last_message[user_id] = msg.message_id
@@ -74,7 +74,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+
+    # Risposta immediata al callback per evitare blocchi
     await query.answer()
+
     user_id = query.from_user.id
     chat_id = query.message.chat.id
     data = query.data
