@@ -133,11 +133,17 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
 # -------------------------------
-# Inizializza Application una sola volta all'avvio
+# Inizializza Application in un loop separato
 # -------------------------------
-loop = asyncio.get_event_loop()
-loop.run_until_complete(application.initialize())
-loop.run_until_complete(application.start())
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
+def start_app():
+    loop.run_until_complete(application.initialize())
+    loop.run_until_complete(application.start())
+    loop.run_forever()
+
+threading.Thread(target=start_app, daemon=True).start()
 
 # -------------------------------
 # Webhook stabile per Render free
@@ -149,8 +155,7 @@ def webhook():
 
     try:
         update = Update.de_json(data, application.bot)
-        # schedula l'update nel loop esistente
-        loop.create_task(application.process_update(update))
+        asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
