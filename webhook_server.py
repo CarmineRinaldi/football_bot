@@ -1,128 +1,62 @@
-import asyncio
-import logging
+from flask import Flask, request
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from database import add_user, mark_started, has_started, add_pronostico, get_schedine, cleanup_schedine
 import os
-from flask import Flask, request, jsonify
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram.request import HTTPXRequest
-from config import TG_BOT_TOKEN, WEBHOOK_URL
-from database import add_user, decrement_pronostico, has_started, mark_started, get_schedine
-from football_api import get_pronostico, get_campionati
-from payments import create_checkout_session
-import nest_asyncio
+import asyncio
 
-nest_asyncio.apply()  # risolve problemi di "no running event loop"
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+TOKEN = os.environ.get("BOT_TOKEN")
 
 app = Flask(__name__)
 
-# ---------------- Telegram ----------------
-httpx_request = HTTPXRequest(connect_timeout=30, read_timeout=30)
-application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
+# Telegram bot setup
+application = ApplicationBuilder().token(TOKEN).build()
 
-last_message = {}
-
-async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
-    if user_id in last_message:
-        try:
-            await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-        except:
-            pass
-    msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
-    last_message[user_id] = msg.message_id
-    return msg
-
-def make_keyboard(options, add_back=True):
-    keyboard = [[InlineKeyboardButton(text, callback_data=data)] for text, data in options]
-    if add_back:
-        keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data="back")])
-    return InlineKeyboardMarkup(keyboard)
-
-async def show_campionati(user_id, chat_id):
-    campionati = get_campionati()
-    options = [(c, f'camp_{c}') for c in campionati]
-    reply_markup = make_keyboard(options)
-    await send_with_delete_previous(user_id, chat_id, "⚽ Scegli il campionato (non sbagliare 😎):", reply_markup=reply_markup)
-
-# ---------------- Handlers ----------------
+# Comandi del bot
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
+    user = update.effective_user
+    add_user(user.id, user.username)
+    if not has_started(user.id):
+        mark_started(user.id)
+    await update.message.reply_text("Benvenuto! Usa /schedina per inserire un pronostico e /le_mie_schedine per vedere le schedine degli ultimi 10 giorni.")
 
-    if not await has_started(user_id):
-        await add_user(user_id)
-        await mark_started(user_id)
+async def schedina(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    text = " ".join(context.args)
+    if not text:
+        await update.message.reply_text("Devi scrivere un pronostico dopo il comando!")
+        return
+    add_pronostico(user.id, text)
+    cleanup_schedine()
+    await update.message.reply_text("Schedina salvata!")
 
-    options = [
-        ("🎯 Pronostico Free (5 schedine)", 'free'),
-        ("💸 Compra 10 schedine - 2€", 'buy_10'),
-        ("🌟 VIP 4,99€ - Tutti i pronostici", 'vip'),
-        ("📋 Le mie schedine", 'myschedine')
-    ]
-    reply_markup = make_keyboard(options, add_back=False)
-    await send_with_delete_previous(user_id, chat_id, "👋 Benvenuto! Scegli il tuo piano:", reply_markup=reply_markup)
+async def le_mie_schedine(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    schedine = get_schedine(user.id)
+    if not schedine:
+        await update.message.reply_text("Nessuna schedina trovata negli ultimi 10 giorni.")
+        return
+    msg = "Le tue schedine degli ultimi 10 giorni:\n"
+    for s, date in schedine:
+        msg += f"- {s} ({date})\n"
+    await update.message.reply_text(msg)
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    chat_id = query.message.chat.id
-    data = query.data
-
-    await send_with_delete_previous(user_id, chat_id, "⏳ Caricamento...", reply_markup=None)
-
-    if data == 'free':
-        await decrement_pronostico(user_id)
-        await show_campionati(user_id, chat_id)
-    elif data == 'buy_10':
-        url = create_checkout_session(user_id, "2eur")
-        await send_with_delete_previous(user_id, chat_id, f"🛒 Acquista qui: {url}")
-    elif data == 'vip':
-        url = create_checkout_session(user_id, "vip")
-        await send_with_delete_previous(user_id, chat_id, f"🌟 VIP! Acquista qui: {url}")
-    elif data == 'myschedine':
-        schedine = await get_schedine(user_id)
-        if schedine:
-            text = "📋 Le tue schedine:\n" + "\n\n".join([f"{i+1}) {s[1]}" for i, s in enumerate(schedine)])
-        else:
-            text = "📋 Le tue schedine:\n- Nessuna schedina disponibile 🤷‍♂️"
-        reply_markup = make_keyboard([("⬅️ Indietro", "back")], add_back=False)
-        await send_with_delete_previous(user_id, chat_id, text, reply_markup=reply_markup)
-    elif data.startswith('camp_'):
-        campionato = data.split('_', 1)[1]
-        pronostico = get_pronostico(user_id, campionato)
-        reply_markup = make_keyboard([("⬅️ Indietro", "back")], add_back=False)
-        await send_with_delete_previous(user_id, chat_id, f"📊 Pronostico per {campionato}:\n{pronostico}", reply_markup=reply_markup)
-    elif data == 'back':
-        await start(update, context)
-
-# ---------------- Register handlers ----------------
+# Aggiunta comandi
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(button_handler))
+application.add_handler(CommandHandler("schedina", schedina))
+application.add_handler(CommandHandler("le_mie_schedine", le_mie_schedine))
 
-# ---------------- Flask webhook ----------------
+# Webhook Flask
 @app.route("/webhook", methods=["POST"])
-async def webhook():
-    data = await request.get_json(force=True)
+def webhook():
+    data = request.get_json(force=True)
     update = Update.de_json(data, application.bot)
-    await application.process_update(update)
+    asyncio.run(application.process_update(update))
     return "ok"
 
 @app.route("/", methods=["GET"])
 def index():
-    return "✅ Bot Telegram attivo!"
+    return "Bot attivo!"
 
-@app.route("/set_webhook", methods=["GET"])
-async def set_webhook():
-    await application.bot.delete_webhook()
-    success = await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
-    if success:
-        return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
-    return jsonify({"status": "error", "message": "Errore nell'impostazione del webhook"}), 500
-
-# ---------------- Run Flask ----------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
