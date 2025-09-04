@@ -1,51 +1,39 @@
+import asyncio
+import logging
+import os
 from flask import Flask, request, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.request import HTTPXRequest
 from config import TG_BOT_TOKEN, WEBHOOK_URL
-from database import add_user, decrement_pronostico, has_started, mark_started, get_schedine, add_pronostici
+from database import add_user, decrement_pronostico, has_started, mark_started, get_schedine
 from football_api import get_pronostico, get_campionati
 from payments import create_checkout_session
-import logging
-import asyncio
-import os
+import nest_asyncio
 
-# -------------------------------
-# Logging
-# -------------------------------
+nest_asyncio.apply()  # risolve problemi di "no running event loop"
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# -------------------------------
-# Flask
-# -------------------------------
 app = Flask(__name__)
 
-# -------------------------------
-# Telegram Application async
-# -------------------------------
-httpx_request = HTTPXRequest(connect_timeout=30, read_timeout=30, pool_timeout=120, connection_pool_size=20)
+# ---------------- Telegram ----------------
+httpx_request = HTTPXRequest(connect_timeout=30, read_timeout=30)
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
-# -------------------------------
-# Memorizzazione messaggi per auto-eliminazione
-# -------------------------------
-last_message = {}  # user_id -> message_id
+last_message = {}
 
 async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
     if user_id in last_message:
         try:
             await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-        except Exception as e:
-            logger.warning(f"Impossibile eliminare messaggio precedente: {e}")
-
+        except:
+            pass
     msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
     last_message[user_id] = msg.message_id
     return msg
 
-# -------------------------------
-# Tastiere
-# -------------------------------
 def make_keyboard(options, add_back=True):
     keyboard = [[InlineKeyboardButton(text, callback_data=data)] for text, data in options]
     if add_back:
@@ -58,9 +46,7 @@ async def show_campionati(user_id, chat_id):
     reply_markup = make_keyboard(options)
     await send_with_delete_previous(user_id, chat_id, "⚽ Scegli il campionato (non sbagliare 😎):", reply_markup=reply_markup)
 
-# -------------------------------
-# Handlers
-# -------------------------------
+# ---------------- Handlers ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -76,7 +62,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("📋 Le mie schedine", 'myschedine')
     ]
     reply_markup = make_keyboard(options, add_back=False)
-    await send_with_delete_previous(user_id, chat_id, "👋 Benvenuto campione! Scegli il tuo piano o esplora le tue schedine:", reply_markup=reply_markup)
+    await send_with_delete_previous(user_id, chat_id, "👋 Benvenuto! Scegli il tuo piano:", reply_markup=reply_markup)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -91,10 +77,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await decrement_pronostico(user_id)
         await show_campionati(user_id, chat_id)
     elif data == 'buy_10':
-        url = create_checkout_session(user_id, price_id="price_2euro_10pronostici")
+        url = create_checkout_session(user_id, "2eur")
         await send_with_delete_previous(user_id, chat_id, f"🛒 Acquista qui: {url}")
     elif data == 'vip':
-        url = create_checkout_session(user_id, price_id="price_vip_10al_giorno")
+        url = create_checkout_session(user_id, "vip")
         await send_with_delete_previous(user_id, chat_id, f"🌟 VIP! Acquista qui: {url}")
     elif data == 'myschedine':
         schedine = await get_schedine(user_id)
@@ -112,15 +98,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'back':
         await start(update, context)
 
-# -------------------------------
-# Registrazione Handlers
-# -------------------------------
+# ---------------- Register handlers ----------------
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# -------------------------------
-# Webhook Flask
-# -------------------------------
+# ---------------- Flask webhook ----------------
 @app.route("/webhook", methods=["POST"])
 async def webhook():
     data = await request.get_json(force=True)
@@ -140,9 +122,7 @@ async def set_webhook():
         return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
     return jsonify({"status": "error", "message": "Errore nell'impostazione del webhook"}), 500
 
-# -------------------------------
-# Avvio Flask
-# -------------------------------
+# ---------------- Run Flask ----------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
