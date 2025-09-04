@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # -------------------------------
-# Telegram bot
+# Telegram Application
 # -------------------------------
 httpx_request = HTTPXRequest(
     connect_timeout=30,
@@ -34,30 +34,21 @@ httpx_request = HTTPXRequest(
 application = ApplicationBuilder().token(TG_BOT_TOKEN).request(httpx_request).build()
 
 # -------------------------------
-# Memorizzazione messaggi
-# -------------------------------
-last_message = {}  # user_id -> message_id
-
-async def send_with_delete_previous(user_id, chat_id, text, reply_markup=None):
-    if user_id in last_message:
-        try:
-            await application.bot.delete_message(chat_id=chat_id, message_id=last_message[user_id])
-        except:
-            pass
-    msg = await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
-    last_message[user_id] = msg.message_id
-    return msg
-
-# -------------------------------
 # Handlers
 # -------------------------------
+async def send_message(user_id, chat_id, text, reply_markup=None):
+    """Invia messaggio senza tenere nulla in memoria globale."""
+    await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    if not has_started(user_id):
-        add_user(user_id)
-        mark_started(user_id)
+    if has_started(user_id):
+        return  # l'utente ha già cliccato start
+
+    add_user(user_id)
+    mark_started(user_id)
 
     keyboard = [
         [InlineKeyboardButton("Pronostico Free (1 su 3 schedine su 10)", callback_data='free')],
@@ -65,11 +56,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("VIP 4,99€ - Tutti i pronostici", callback_data='vip')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await send_with_delete_previous(user_id, chat_id, 'Benvenuto! Scegli il tuo piano:', reply_markup=reply_markup)
+    await send_message(user_id, chat_id, 'Benvenuto! Scegli il tuo piano:', reply_markup=reply_markup)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await query.answer()  # risposta immediata al callback
+
     user_id = query.from_user.id
     chat_id = query.message.chat.id
     data = query.data
@@ -79,57 +71,61 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_campionati(user_id, chat_id)
     elif data == 'buy_10':
         url = create_checkout_session(user_id, price_id="price_2euro_10pronostici")
-        await send_with_delete_previous(user_id, chat_id, f"Acquista qui: {url}")
+        await send_message(user_id, chat_id, f"Acquista qui: {url}")
     elif data == 'vip':
         url = create_checkout_session(user_id, price_id="price_vip_10al_giorno")
-        await send_with_delete_previous(user_id, chat_id, f"Abbonamento VIP attivo! Acquista qui: {url}")
+        await send_message(user_id, chat_id, f"Abbonamento VIP attivo! Acquista qui: {url}")
     elif data.startswith('camp_'):
         campionato = data.split('_', 1)[1]
         pronostico = get_pronostico(user_id, campionato)
-        await send_with_delete_previous(user_id, chat_id, f"Pronostico per {campionato}:\n{pronostico}")
+        await send_message(user_id, chat_id, f"Pronostico per {campionato}:\n{pronostico}")
 
 async def show_campionati(user_id, chat_id):
     campionati = get_campionati()
     keyboard = [[InlineKeyboardButton(c, callback_data=f'camp_{c}')] for c in campionati]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await send_with_delete_previous(user_id, chat_id, "Scegli il campionato:", reply_markup=reply_markup)
+    await send_message(user_id, chat_id, "Scegli il campionato:", reply_markup=reply_markup)
 
 # -------------------------------
-# Aggiunta handler
+# Aggiunta handlers
 # -------------------------------
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
 # -------------------------------
-# Webhook endpoint
+# Webhook
 # -------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
+    logger.info(f"Update ricevuto: {data}")
+
     try:
         update = Update.de_json(data, application.bot)
-        # Thread-safe con il loop del bot
-        asyncio.run_coroutine_threadsafe(application.process_update(update), application._loop)
+        # esegui process_update nel loop principale
+        asyncio.run(application.process_update(update))
     except Exception as e:
         logger.exception("Errore processando update")
         return jsonify({"status": "error", "message": str(e)}), 500
+
     return "ok"
 
 # -------------------------------
-# Debug endpoint
+# Endpoint debug
 # -------------------------------
 @app.route("/", methods=["GET"])
 def index():
     return "Bot Telegram attivo!"
 
 # -------------------------------
-# Imposta webhook
+# Endpoint impostazione webhook
 # -------------------------------
 @app.route("/set_webhook", methods=["GET"])
 def set_webhook():
     async def setup_webhook():
         await application.bot.delete_webhook()
         return await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
+
     try:
         success = asyncio.run(setup_webhook())
     except Exception as e:
@@ -138,10 +134,11 @@ def set_webhook():
 
     if success:
         return jsonify({"status": "ok", "message": "Webhook impostato correttamente!"})
-    return jsonify({"status": "error", "message": "Errore impostazione webhook"}), 500
+    else:
+        return jsonify({"status": "error", "message": "Errore nell'impostazione del webhook"}), 500
 
 # -------------------------------
-# Avvio Flask (solo debug)
+# Avvio Flask
 # -------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
