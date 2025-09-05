@@ -10,7 +10,6 @@ init_db()
 
 TOKEN = os.environ.get("TG_BOT_TOKEN")
 
-# Comandi asincroni
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username)
@@ -49,7 +48,6 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not text: text = "Non hai schedine."
         await query.edit_message_text(text)
 
-# Applicazione Telegram
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(callback))
