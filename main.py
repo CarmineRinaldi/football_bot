@@ -1,67 +1,54 @@
 import os
-import asyncio
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# -------------------------------
-# CONFIG
-# -------------------------------
-TOKEN = os.environ.get("TG_BOT_TOKEN")  # Inserisci il token come variabile d'ambiente
-WEBHOOK_PATH = "/webhook"  # Endpoint webhook
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # URL completo del webhook su Render
+TOKEN = os.environ.get("TG_BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # es: https://tuoapp.onrender.com/webhook
+PORT = int(os.environ.get("PORT", 8443))
 
-# -------------------------------
-# TELEGRAM HANDLERS
-# -------------------------------
+flask_app = Flask(__name__)
+
+# --- Handlers Telegram ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Info", callback_data="info")],
-        [InlineKeyboardButton("Aiuto", callback_data="help")],
+        [InlineKeyboardButton("Help", callback_data="help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Ciao! Scegli un'opzione:", reply_markup=reply_markup)
+    await update.message.reply_text("Benvenuto! Scegli un'opzione:", reply_markup=reply_markup)
 
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == "info":
-        await query.edit_message_text("Questo è un bot di esempio su Render.")
+        await query.edit_message_text(text="Queste sono le informazioni sul bot.")
     elif query.data == "help":
-        await query.edit_message_text("Usa /start per vedere il menu.")
+        await query.edit_message_text(text="Ecco come usare il bot...")
 
-# -------------------------------
-# BUILD TELEGRAM APP
-# -------------------------------
+# --- Application Telegram ---
 app_telegram = ApplicationBuilder().token(TOKEN).build()
 app_telegram.add_handler(CommandHandler("start", start))
-app_telegram.add_handler(CallbackQueryHandler(callback_handler))
+app_telegram.add_handler(CallbackQueryHandler(button))
 
-# Imposta webhook
-async def setup_webhook():
-    await app_telegram.bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+# --- Flask routes ---
+@flask_app.route("/")
+def index():
+    return "Bot attivo!"
 
-# -------------------------------
-# FLASK APP
-# -------------------------------
-flask_app = Flask(__name__)
-
-@flask_app.route(WEBHOOK_PATH, methods=["POST"])
+@flask_app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), app_telegram.bot)
-    asyncio.run(app_telegram.update_queue.put(update))
-    return "ok", 200
+    app_telegram.update_queue.put(update)
+    return "ok"
 
-# -------------------------------
-# AVVIO
-# -------------------------------
+# --- Set Webhook quando il bot parte ---
+async def setup_webhook():
+    await app_telegram.bot.set_webhook(WEBHOOK_URL)
+
+# --- Avvio bot asincrono ---
+import asyncio
+asyncio.get_event_loop().run_until_complete(setup_webhook())
+
 if __name__ == "__main__":
-    # Setup webhook async prima di avviare Gunicorn
-    asyncio.run(setup_webhook())
-    # Flask gestirà le richieste su Render
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    flask_app.run(host="0.0.0.0", port=PORT)
