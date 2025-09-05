@@ -1,18 +1,18 @@
-from fastapi import FastAPI
-from app.bot.webhook import router
-from app.services.scheduler import start_scheduler
-from app.utils.logger import logger
+from fastapi import FastAPI, Request
+import asyncio
+from bot.bot import bot, dp
+from bot.queue_handler import UpdateQueue
 
 app = FastAPI()
 
-app.include_router(router)
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    # Metti l'update nella coda asincrona
+    await UpdateQueue.queue.put(data)
+    return {"ok": True}
 
+# Background task per processare la coda
 @app.on_event("startup")
-async def startup_event():
-    logger.info("Starting scheduler...")
-    start_scheduler()
-    logger.info("Bot started!")
-
-@app.get("/healthz")
-def health():
-    return {"status": "ok"}
+async def start_background_tasks():
+    asyncio.create_task(UpdateQueue.process_queue(dp))
