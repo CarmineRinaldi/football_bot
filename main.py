@@ -1,39 +1,55 @@
-# main.py
+import os
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-import os
+# ------------------------------
+# VARIABILI D'AMBIENTE
+# ------------------------------
+TOKEN = os.getenv("TG_BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# --- Configurazione ---
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Assicurati di aver impostato questa variabile in Render
+if not TOKEN:
+    raise ValueError("Errore: la variabile TG_BOT_TOKEN non è impostata!")
 
-# --- Flask app ---
+# ------------------------------
+# APP FLASK
+# ------------------------------
 flask_app = Flask(__name__)
 
-@flask_app.route('/')
-def index():
-    return "Bot Telegram attivo!"
-
-# --- Telegram Bot ---
+# ------------------------------
+# HANDLER DEL BOT
+# ------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Ciao! Sono il tuo bot Telegram.")
+    await update.message.reply_text("Ciao! Sono il tuo Football Bot ⚽️")
 
-# Creazione applicazione Telegram
+# ------------------------------
+# CREAZIONE DELL'APPLICATION
+# ------------------------------
 app_telegram = ApplicationBuilder().token(TOKEN).build()
-
-# Aggiungi i comandi
 app_telegram.add_handler(CommandHandler("start", start))
 
-# --- Webhook per Render ---
-@flask_app.route(f"/webhook/{TOKEN}", methods=["POST"])
+# ------------------------------
+# ROUTE WEBHOOK
+# ------------------------------
+@flask_app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
+    """Riceve aggiornamenti da Telegram via webhook."""
     update = Update.de_json(request.get_json(force=True), app_telegram.bot)
-    # Esegui aggiornamenti
-    app_telegram.update_queue.put_nowait(update)
-    return "OK"
+    app_telegram.update_queue.put(update)
+    return "ok", 200
 
-# --- Main ---
+@flask_app.route("/", methods=["GET"])
+def index():
+    return "Football Bot attivo!", 200
+
+# ------------------------------
+# AVVIO WEBHOOK SU RENDER
+# ------------------------------
+async def set_webhook():
+    await app_telegram.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+
 if __name__ == "__main__":
-    # Se vuoi testare in locale
+    import asyncio
+    asyncio.run(set_webhook())
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
