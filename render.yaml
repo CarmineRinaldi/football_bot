@@ -3,12 +3,11 @@ services:
     name: football-bot
     env: python
     plan: free
+    pythonVersion: 3.11.9      # forza Python 3.11
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /.well-known/health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
       - key: DATABASE_URL
         sync: false
       - key: TG_BOT_TOKEN
