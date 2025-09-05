@@ -4,15 +4,14 @@ from db import init_db, delete_old_tickets
 from bot_logic import start, show_main_menu, show_leagues, show_matches, create_ticket
 from stripe_webhook import handle_stripe_event
 
-# inizializza DB e pulizia schedine vecchie
-init_db()
-delete_old_tickets()
+init_db()  # crea le tabelle al deploy
+delete_old_tickets()  # pulizia schedine vecchie
 
 app = FastAPI()
 
 @app.get("/")
 async def root():
-    return {"status": "Bot online!"}
+    return {"message": "Bot online!"}
 
 @app.post("/webhook")
 async def telegram_webhook(req: Request):
