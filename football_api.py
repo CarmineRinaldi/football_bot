@@ -1,18 +1,32 @@
 import os
 import requests
 
-API_FOOTBALL_KEY = os.environ["API_FOOTBALL_KEY"]
+API_KEY = os.getenv("API_FOOTBALL_KEY")
+
+BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
 
 HEADERS = {
-    "x-rapidapi-key": API_FOOTBALL_KEY,
-    "x-rapidapi-host": "api-football-v1.p.rapidapi.com"
+    "X-RapidAPI-Key": API_KEY,
+    "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
 }
 
-def get_matches(league_id=None):
-    url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
-    params = {"season": 2025}  # esempio
-    if league_id:
-        params["league"] = league_id
-    r = requests.get(url, headers=HEADERS, params=params)
-    data = r.json()
-    return data.get("response", [])
+def get_leagues():
+    url = f"{BASE_URL}/leagues"
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        return response.json()["response"]
+    return []
+
+def get_matches(league_id):
+    url = f"{BASE_URL}/fixtures?league={league_id}&season=2025"
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        return response.json()["response"]
+    return []
+
+def get_match_odds(fixture_id):
+    url = f"{BASE_URL}/odds?fixture={fixture_id}"
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        return response.json()["response"]
+    return []
