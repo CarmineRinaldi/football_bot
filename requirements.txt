@@ -1,9 +1,0 @@
-fastapi==0.95.2
-uvicorn==0.22.0
-aiogram==3.0.0b7
-SQLAlchemy==1.4.48
-alembic==1.11.1
-psycopg2-binary==2.9.6
-httpx==0.24.1
-stripe==6.4.0
-python-dotenv==1.0.0
