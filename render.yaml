@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: football-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /.well-known/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_URL
+        sync: false
+      - key: TG_BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: API_FOOTBALL_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_ENDPOINT_SECRET
+        sync: false
+      - key: ADMIN_HTTP_TOKEN
+        sync: false
+      - key: FREE_MAX_MATCHES
+        sync: false
+      - key: VIP_MAX_MATCHES
+        sync: false
