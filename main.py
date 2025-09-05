@@ -1,66 +1,67 @@
 import os
 import asyncio
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from db import init_db, add_user, get_user, add_schedina, get_schedine, update_user_plan
-from football_api import get_matches
-from utils import format_schedina, make_inline_keyboard
+from flask import Flask, request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+)
 
-init_db()
+# -------------------------------
+# CONFIG
+# -------------------------------
+TOKEN = os.environ.get("TG_BOT_TOKEN")  # Inserisci il token come variabile d'ambiente
+WEBHOOK_PATH = "/webhook"  # Endpoint webhook
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # URL completo del webhook su Render
 
-TOKEN = os.environ.get("TG_BOT_TOKEN")
-
+# -------------------------------
+# TELEGRAM HANDLERS
+# -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    add_user(user.id, user.username)
-    buttons = [("Free", "plan_free"), ("2€ - 10 schedine", "plan_2eur"), ("VIP 4,99€/mese", "plan_vip")]
-    await update.message.reply_text("Benvenuto! Scegli un piano:", reply_markup=make_inline_keyboard(buttons))
+    keyboard = [
+        [InlineKeyboardButton("Info", callback_data="info")],
+        [InlineKeyboardButton("Aiuto", callback_data="help")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Ciao! Scegli un'opzione:", reply_markup=reply_markup)
 
-async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user = get_user(query.from_user.id)
-    data = query.data
+    if query.data == "info":
+        await query.edit_message_text("Questo è un bot di esempio su Render.")
+    elif query.data == "help":
+        await query.edit_message_text("Usa /start per vedere il menu.")
 
-    if data.startswith("plan_"):
-        plan = data.split("_")[1]
-        update_user_plan(user["id"], plan)
-        buttons = [("Serie A","league_SA"),("Premier League","league_PL"),("Le mie schedine","my_schedules")]
-        await query.edit_message_text("Seleziona il campionato o le tue schedine:", reply_markup=make_inline_keyboard(buttons))
+# -------------------------------
+# BUILD TELEGRAM APP
+# -------------------------------
+app_telegram = ApplicationBuilder().token(TOKEN).build()
+app_telegram.add_handler(CommandHandler("start", start))
+app_telegram.add_handler(CallbackQueryHandler(callback_handler))
 
-    elif data.startswith("league_"):
-        league = data.split("_")[1]
-        matches = get_matches(league)
-        kb = [(f"{m['home']} vs {m['away']}", f"match_{m['id']}") for m in matches[:5]]
-        await query.edit_message_text("Scegli le partite da inserire nella schedina:", reply_markup=make_inline_keyboard(kb))
+# Imposta webhook
+async def setup_webhook():
+    await app_telegram.bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
 
-    elif data.startswith("match_"):
-        match_id = int(data.split("_")[1])
-        matches = get_matches(2025)
-        match = next((m for m in matches if m["id"]==match_id), None)
-        if match:
-            add_schedina(user["id"], [match], [1.5])
-            await query.edit_message_text("Schedina aggiunta!")
-
-    elif data == "my_schedules":
-        schedine = get_schedine(user["id"])
-        text = "\n\n".join([format_schedina(s["matches"], s["odds"]) for s in schedine])
-        if not text: text = "Non hai schedine."
-        await query.edit_message_text(text)
-
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(callback))
-
-# Flask Webhook
-from flask import Flask, request
+# -------------------------------
+# FLASK APP
+# -------------------------------
 flask_app = Flask(__name__)
 
-@flask_app.route("/webhook", methods=["POST"])
+@flask_app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), app.bot)
-    asyncio.run(app.update_queue.put(update))
+    update = Update.de_json(request.get_json(force=True), app_telegram.bot)
+    asyncio.run(app_telegram.update_queue.put(update))
     return "ok", 200
 
+# -------------------------------
+# AVVIO
+# -------------------------------
 if __name__ == "__main__":
+    # Setup webhook async prima di avviare Gunicorn
+    asyncio.run(setup_webhook())
+    # Flask gestirà le richieste su Render
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
