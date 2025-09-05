@@ -1,4 +1,5 @@
-flask
-requests
+flask==3.1.2
 python-telegram-bot==20.5
-stripe
+requests==2.32.5
+stripe==12.5.1
+gunicorn==21.2.0
