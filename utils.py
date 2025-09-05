@@ -1,12 +1,12 @@
-import time
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-def format_schedina(matches, odds):
-    text = ""
-    for i, m in enumerate(matches):
-        text += f"{m['home']} vs {m['away']} | Quote: {odds[i]}\n"
-    return text
-
-def make_inline_keyboard(buttons):
-    kb = [[InlineKeyboardButton(text=b[0], callback_data=b[1])] for b in buttons]
+def make_inline_keyboard(buttons, row_width=2):
+    kb = [[InlineKeyboardButton(text, callback_data=data) for text, data in buttons[i:i+row_width]] 
+          for i in range(0, len(buttons), row_width)]
     return InlineKeyboardMarkup(kb)
+
+def format_schedina(matches, odds):
+    lines = []
+    for m, o in zip(matches, odds):
+        lines.append(f"{m['home']} vs {m['away']} → quota: {o}")
+    return "\n".join(lines)
