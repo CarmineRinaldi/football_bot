@@ -1,5 +1,4 @@
-fastapi==0.111.0
-uvicorn==0.26.1
+Flask==3.1.2
 requests==2.32.3
 stripe==12.5.1
 gunicorn==21.2.0
