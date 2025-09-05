@@ -1,4 +1,4 @@
-flask
-stripe
-requests
-gunicorn
+Flask==3.1.2
+requests==2.32.3
+stripe==12.5.1
+gunicorn==21.2.0
