@@ -7,13 +7,11 @@ DB_PATH = os.getenv("DATABASE_URL", "users.db")
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # tabella utenti
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     plan TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                  )''')
-    # tabella schedine
     c.execute('''CREATE TABLE IF NOT EXISTS tickets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
