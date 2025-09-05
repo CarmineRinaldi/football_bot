@@ -1,4 +1,4 @@
-from db import add_user, get_user_plan, add_ticket
+from db import add_user, get_user_plan, add_ticket, get_user_tickets
 from football_api import get_leagues, get_matches
 
 def start(update, context):
@@ -30,14 +30,8 @@ def show_matches(update, context, league_id):
     return {"text": "Seleziona le partite per la schedina:", "reply_markup": {"inline_keyboard": keyboard}}
 
 def create_ticket(user_id, match_ids):
-    from os import getenv
-    plan = get_user_plan(user_id)
-    free_max = int(getenv("FREE_MAX_MATCHES", 5))
-    vip_max = int(getenv("VIP_MAX_MATCHES", 20))
-    max_matches = vip_max if plan == "vip" else free_max if plan == "free" else len(match_ids)
-    
-    if len(match_ids) > max_matches:
-        match_ids = match_ids[:max_matches]
-    
+    if len(match_ids) > 5 and get_user_plan(user_id) == "free":
+        match_ids = match_ids[:5]
     add_ticket(user_id, match_ids)
     return {"text": f"Schedina creata con {len(match_ids)} partite!"}
+
