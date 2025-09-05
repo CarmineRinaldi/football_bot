@@ -1,8 +1,17 @@
 services:
   - type: web
-    name: football_bot
+    name: football-bot
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    pythonVersion: 3.13.4
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python app/main.py"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: football-bot-db
+          property: connectionString
+    pythonVersion: 3.11.4
+
+  - type: postgres
+    name: football-bot-db
+    plan: free
