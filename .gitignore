@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.venv/
+.env
+
+# SQLite
+users.db
+/data/*
+
+# OS
+.DS_Store
+.python-version
+
+# Logs
+*.log
