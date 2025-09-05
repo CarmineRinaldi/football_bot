@@ -5,10 +5,10 @@ class UpdateQueue:
     def __init__(self):
         self.queue = asyncio.Queue()
         self.running = False
+        self._task = None  # Salviamo il task per poterlo fermare correttamente
 
-    async def process_queue(self):
+    async def _process_queue(self):
         """Processa gli aggiornamenti nella coda."""
-        self.running = True
         while self.running:
             item = await self.queue.get()
             try:
@@ -19,6 +19,12 @@ class UpdateQueue:
             finally:
                 self.queue.task_done()
 
+    async def start(self):
+        """Avvia il processing della coda."""
+        if not self.running:
+            self.running = True
+            self._task = asyncio.create_task(self._process_queue())
+
     async def add_to_queue(self, item):
         """Aggiunge un item alla coda in modo sicuro."""
         await self.queue.put(item)
@@ -26,14 +32,13 @@ class UpdateQueue:
     async def stop(self):
         """Ferma il processing della coda."""
         self.running = False
-        await self.queue.join()  # Aspetta che tutti gli item siano processati
+        if self._task:
+            await self.queue.join()  # Aspetta che tutti gli item siano processati
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
 
-# Esempio di utilizzo (non da lanciare in Render direttamente)
-# async def main():
-#     uq = UpdateQueue()
-#     asyncio.create_task(uq.process_queue())
-#     await uq.add_to_queue("Test item")
-#     await asyncio.sleep(1)
-#     await uq.stop()
-#
-# asyncio.run(main())
+# Creiamo un'istanza globale per usarla nel bot
+update_queue = UpdateQueue()
