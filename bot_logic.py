@@ -2,13 +2,10 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
 from football_api import get_leagues, get_matches
 from db import add_user, get_user_tickets, add_ticket, can_create_prediction
-import datetime
 
-# Menu principale
 def start(update: Update, context: CallbackContext):
     user = update.effective_user
-    add_user(user.id)  # aggiungi utente al DB se non esiste
-
+    add_user(user.id)
     keyboard = [
         [InlineKeyboardButton("Scegli Campionato", callback_data="choose_league")],
         [InlineKeyboardButton("Nazionali", callback_data="choose_national")],
@@ -19,7 +16,6 @@ def start(update: Update, context: CallbackContext):
         "Benvenuto! Scegli un'opzione:", reply_markup=reply_markup
     )
 
-# Gestione dei callback dei bottoni
 def button(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
@@ -44,7 +40,6 @@ def button(update: Update, context: CallbackContext):
 
     elif query.data.startswith("match_"):
         match_id = int(query.data.split("_")[1])
-        # Controllo limite pronostici giornalieri
         if can_create_prediction(user_id, max_per_day=5):
             add_ticket(user_id, match_id)
             query.edit_message_text("Pronostico registrato! Puoi farne massimo 5 al giorno.")
@@ -64,7 +59,7 @@ def button(update: Update, context: CallbackContext):
     elif query.data == "my_tickets":
         tickets = get_user_tickets(user_id)
         if tickets:
-            text = "Le tue schedine:\n" + "\n".join([f"{t['match']}" for t in tickets])
+            text = "Le tue schedine:\n" + "\n".join([f"{t['match_id']}" for t in tickets])
         else:
             text = "Non hai ancora schedine."
         query.edit_message_text(text)
