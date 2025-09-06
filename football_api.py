@@ -1,12 +1,34 @@
-# Mock API
-def get_leagues():
-    return ["Serie A", "Premier League", "La Liga"]
+import requests
+import os
 
-def get_matches(league):
-    if league == "Serie A":
-        return [{"id": "1", "home": "Juventus", "away": "Inter"}, {"id": "2", "home": "Milan", "away": "Napoli"}]
-    elif league == "Premier League":
-        return [{"id": "3", "home": "Manchester Utd", "away": "Chelsea"}, {"id": "4", "home": "Arsenal", "away": "Liverpool"}]
-    elif league == "La Liga":
-        return [{"id": "5", "home": "Real Madrid", "away": "Barcelona"}, {"id": "6", "home": "Atletico", "away": "Sevilla"}]
-    return []
+API_KEY = os.getenv("API_FOOTBALL_KEY")
+
+def get_leagues():
+    url = "https://api-football-v1.p.rapidapi.com/v3/leagues"
+    headers = {
+        "X-RapidAPI-Key": API_KEY,
+        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+    }
+    res = requests.get(url, headers=headers).json()
+    leagues = []
+    for item in res.get("response", []):
+        leagues.append({
+            "name": item["league"]["name"],
+            "id": item["league"]["id"]
+        })
+    return leagues
+
+def get_matches(league_id):
+    url = f"https://api-football-v1.p.rapidapi.com/v3/fixtures?league={league_id}&next=5"
+    headers = {
+        "X-RapidAPI-Key": API_KEY,
+        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+    }
+    res = requests.get(url, headers=headers).json()
+    matches = []
+    for f in res.get("response", []):
+        fixture = f["fixture"]
+        home = f["teams"]["home"]["name"]
+        away = f["teams"]["away"]["name"]
+        matches.append(f"{home} vs {away} ({fixture['date'][:10]})")
+    return matches
