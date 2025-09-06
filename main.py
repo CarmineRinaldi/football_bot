@@ -1,18 +1,17 @@
 import os
 import httpx
 from fastapi import FastAPI, Request
-from db import init_db, delete_old_tickets
-from bot_logic import start, show_main_menu, show_plan_info, show_leagues, show_matches
+from db import init_db, delete_old_tickets, get_user_tickets
+from bot_logic import (
+    start, show_main_menu, show_plan_info, show_leagues, show_matches, show_my_tickets
+)
 from stripe_webhook import handle_stripe_event
 
 # inizializza DB e pulizia schedine vecchie
 init_db()
 delete_old_tickets()
 
-# FastAPI app
 app = FastAPI()
-
-# Telegram bot token
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 BASE_URL = f"https://api.telegram.org/bot{TG_BOT_TOKEN}"
 
@@ -40,50 +39,52 @@ async def telegram_webhook(req: Request):
     data = await req.json()
     print("Webhook ricevuto:", data)
 
-    # Messaggi testuali
-    if "message" in data and "text" in data["message"]:
+    if "message" in data:
         chat_id = data["message"]["chat"]["id"]
         message_id = data["message"]["message_id"]
-        text = data["message"]["text"]
+        text = data["message"].get("text", "")
 
         if text == "/start":
             await delete_message(chat_id, message_id)
             response = start(data, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
-    # Callback query (inline buttons)
-    if "callback_query" in data:
+    elif "callback_query" in data:
         cb = data["callback_query"]
         chat_id = cb["message"]["chat"]["id"]
         message_id = cb["message"]["message_id"]
         cb_data = cb["data"]
 
-        # elimina messaggio precedente
         await delete_message(chat_id, message_id)
 
         # Menu principale
         if cb_data == "main_menu":
-            response = show_main_menu(data, None)
+            response = show_main_menu(cb, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
         # Piani
         elif cb_data in ["plan_free", "plan_2eur", "plan_vip"]:
             plan = cb_data.split("_")[1]
-            response = show_plan_info(data, None, plan)
+            response = show_plan_info(cb, None, plan)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
         # Seleziona campionato
         elif cb_data.startswith("select_league_"):
             plan = cb_data.split("_")[-1]
-            response = show_leagues(data, None, plan)
+            response = show_leagues(cb, None, plan)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
-        # Mostra partite del campionato
+        # Mostra partite
         elif cb_data.startswith("league_"):
             parts = cb_data.split("_")
             league_id = int(parts[1])
             plan = parts[2]
-            response = show_matches(data, None, league_id, plan)
+            response = show_matches(cb, None, league_id, plan)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
+
+        # Le mie schedine
+        elif cb_data == "my_tickets":
+            response = show_my_tickets(cb, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
     return {"status": 200}
