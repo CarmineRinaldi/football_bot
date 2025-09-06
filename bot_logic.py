@@ -1,80 +1,55 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CallbackContext
+from telegram.ext import ContextTypes
 from db import add_user, get_user_plan, add_ticket, get_user_tickets
 from football_api import get_leagues, get_matches
+import os
 
-user_state = {}
+FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
+VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
 
-def delete_previous_message(update: Update, context: CallbackContext):
-    try:
-        if update.callback_query:
-            context.bot.delete_message(chat_id=update.effective_chat.id,
-                                       message_id=update.callback_query.message.message_id)
-        else:
-            context.bot.delete_message(chat_id=update.effective_chat.id,
-                                       message_id=update.effective_message.message_id)
-    except:
-        pass
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    add_user(update.effective_user.id, "free")
+    await show_main_menu(update, context)
 
-def start(update: Update, context: CallbackContext):
-    delete_previous_message(update, context)
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        await update.callback_query.message.delete()
     keyboard = [
-        [InlineKeyboardButton("Leagues", callback_data="show_leagues")],
-        [InlineKeyboardButton("My Tickets", callback_data="show_tickets")]
+        [InlineKeyboardButton("Leagues", callback_data="leagues")],
+        [InlineKeyboardButton("My Tickets", callback_data="tickets")]
     ]
-    update.message.reply_text("Welcome! Choose an option:", reply_markup=InlineKeyboardMarkup(keyboard))
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.effective_chat.send_message("Main Menu:", reply_markup=reply_markup)
 
-def show_main_menu(update: Update, context: CallbackContext):
-    delete_previous_message(update, context)
-    keyboard = [
-        [InlineKeyboardButton("Leagues", callback_data="show_leagues")],
-        [InlineKeyboardButton("My Tickets", callback_data="show_tickets")]
-    ]
-    update.callback_query.message.reply_text("Main menu:", reply_markup=InlineKeyboardMarkup(keyboard))
+async def show_leagues(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        await update.callback_query.message.delete()
+    leagues = get_leagues()
+    keyboard = [[InlineKeyboardButton(l["name"], callback_data=f"league_{l['id']}")] for l in leagues]
+    keyboard.append([InlineKeyboardButton("Back", callback_data="main")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.effective_chat.send_message("Select League:", reply_markup=reply_markup)
 
-def show_leagues(update: Update, context: CallbackContext):
-    delete_previous_message(update, context)
-    keyboard = [[InlineKeyboardButton(league, callback_data=f"select_league_{league}")] for league in get_leagues()]
-    keyboard.append([InlineKeyboardButton("Back", callback_data="main_menu")])
-    update.callback_query.message.reply_text("Select a league:", reply_markup=InlineKeyboardMarkup(keyboard))
+async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        await update.callback_query.message.delete()
+    league_id = int(update.callback_query.data.split("_")[1])
+    matches = get_matches(league_id)
+    keyboard = [[InlineKeyboardButton(m, callback_data=f"match_{m}")] for m in matches]
+    keyboard.append([InlineKeyboardButton("Back", callback_data="leagues")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.effective_chat.send_message("Select Match:", reply_markup=reply_markup)
 
-def select_league(update: Update, context: CallbackContext):
-    delete_previous_message(update, context)
-    league = update.callback_query.data.split("_")[-1]
+async def create_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        await update.callback_query.message.delete()
     user_id = update.effective_user.id
-    user_state[user_id] = {"league": league, "matches": []}
-
-    matches = get_matches(league)
-    keyboard = [[InlineKeyboardButton(f"{m['home']} vs {m['away']}", callback_data=f"select_match_{m['id']}")] for m in matches]
-    keyboard.append([InlineKeyboardButton("Finish", callback_data="finish_ticket")])
-    keyboard.append([InlineKeyboardButton("Back", callback_data="show_leagues")])
-    update.callback_query.message.reply_text(f"Select matches for {league}:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-def select_match(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    match_id = update.callback_query.data.split("_")[-1]
-    user_state[user_id]["matches"].append(match_id)
-    update.callback_query.answer("Match added!")
-
-def finish_ticket(update: Update, context: CallbackContext):
-    delete_previous_message(update, context)
-    user_id = update.effective_user.id
-    state = user_state.get(user_id)
-    if state:
-        add_ticket(user_id, state["league"], state["matches"])
-        del user_state[user_id]
-        update.callback_query.answer("Ticket created!")
-    show_main_menu(update, context)
-
-def show_tickets(update: Update, context: CallbackContext):
-    delete_previous_message(update, context)
-    user_id = update.effective_user.id
+    plan = get_user_plan(user_id)
     tickets = get_user_tickets(user_id)
-    if not tickets:
-        text = "No tickets found."
-    else:
-        text = ""
-        for t in tickets:
-            text += f"Ticket {t['ticket_id']} - {t['league']}:\n" + "\n".join(t['matches']) + "\n\n"
-    keyboard = [[InlineKeyboardButton("Back", callback_data="main_menu")]]
-    update.callback_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    max_tickets = VIP_MAX_MATCHES if plan == "vip" else FREE_MAX_MATCHES
+    match = update.callback_query.data.split("_", 1)[1]
+    if len(tickets) >= max_tickets:
+        await update.effective_chat.send_message(f"You reached max tickets ({max_tickets})")
+        return
+    add_ticket(user_id, match)
+    await update.effective_chat.send_message(f"Ticket added: {match}")
