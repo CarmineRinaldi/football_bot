@@ -1,37 +1,80 @@
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import CallbackContext
 from db import add_user, get_user_plan, add_ticket, get_user_tickets
 from football_api import get_leagues, get_matches
 
-def start(update, context):
-    user_id = update["message"]["from"]["id"]
-    add_user(user_id)
-    return show_main_menu(update, context)
+user_state = {}
 
-def show_main_menu(update, context):
+def delete_previous_message(update: Update, context: CallbackContext):
+    try:
+        if update.callback_query:
+            context.bot.delete_message(chat_id=update.effective_chat.id,
+                                       message_id=update.callback_query.message.message_id)
+        else:
+            context.bot.delete_message(chat_id=update.effective_chat.id,
+                                       message_id=update.effective_message.message_id)
+    except:
+        pass
+
+def start(update: Update, context: CallbackContext):
+    delete_previous_message(update, context)
     keyboard = [
-        [{"text": "Free Plan", "callback_data": "plan_free"}],
-        [{"text": "2€ Pack", "callback_data": "plan_2eur"}],
-        [{"text": "VIP Monthly", "callback_data": "plan_vip"}],
-        [{"text": "Le mie schedine", "callback_data": "my_tickets"}]
+        [InlineKeyboardButton("Leagues", callback_data="show_leagues")],
+        [InlineKeyboardButton("My Tickets", callback_data="show_tickets")]
     ]
-    message = "Benvenuto! Scegli un piano o controlla le tue schedine:"
-    return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
+    update.message.reply_text("Welcome! Choose an option:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-def show_leagues(update, context):
-    leagues = get_leagues()
-    keyboard = [[{"text": l["league"]["name"], "callback_data": f"league_{l['league']['id']}"}] for l in leagues]
-    keyboard.append([{"text": "Indietro", "callback_data": "main_menu"}])
-    return {"text": "Seleziona un campionato:", "reply_markup": {"inline_keyboard": keyboard}}
+def show_main_menu(update: Update, context: CallbackContext):
+    delete_previous_message(update, context)
+    keyboard = [
+        [InlineKeyboardButton("Leagues", callback_data="show_leagues")],
+        [InlineKeyboardButton("My Tickets", callback_data="show_tickets")]
+    ]
+    update.callback_query.message.reply_text("Main menu:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-def show_matches(update, context, league_id):
-    matches = get_matches(league_id)
-    keyboard = [[{"text": f"{m['fixture']['home']['name']} vs {m['fixture']['away']['name']}", 
-                  "callback_data": f"match_{m['fixture']['id']}"}] for m in matches[:20]]
-    keyboard.append([{"text": "Indietro", "callback_data": f"plan_{get_user_plan(update['message']['from']['id'])}"}])
-    return {"text": "Seleziona le partite per la schedina:", "reply_markup": {"inline_keyboard": keyboard}}
+def show_leagues(update: Update, context: CallbackContext):
+    delete_previous_message(update, context)
+    keyboard = [[InlineKeyboardButton(league, callback_data=f"select_league_{league}")] for league in get_leagues()]
+    keyboard.append([InlineKeyboardButton("Back", callback_data="main_menu")])
+    update.callback_query.message.reply_text("Select a league:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-def create_ticket(user_id, match_ids):
-    if len(match_ids) > 5 and get_user_plan(user_id) == "free":
-        match_ids = match_ids[:5]
-    add_ticket(user_id, match_ids)
-    return {"text": f"Schedina creata con {len(match_ids)} partite!"}
+def select_league(update: Update, context: CallbackContext):
+    delete_previous_message(update, context)
+    league = update.callback_query.data.split("_")[-1]
+    user_id = update.effective_user.id
+    user_state[user_id] = {"league": league, "matches": []}
 
+    matches = get_matches(league)
+    keyboard = [[InlineKeyboardButton(f"{m['home']} vs {m['away']}", callback_data=f"select_match_{m['id']}")] for m in matches]
+    keyboard.append([InlineKeyboardButton("Finish", callback_data="finish_ticket")])
+    keyboard.append([InlineKeyboardButton("Back", callback_data="show_leagues")])
+    update.callback_query.message.reply_text(f"Select matches for {league}:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+def select_match(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    match_id = update.callback_query.data.split("_")[-1]
+    user_state[user_id]["matches"].append(match_id)
+    update.callback_query.answer("Match added!")
+
+def finish_ticket(update: Update, context: CallbackContext):
+    delete_previous_message(update, context)
+    user_id = update.effective_user.id
+    state = user_state.get(user_id)
+    if state:
+        add_ticket(user_id, state["league"], state["matches"])
+        del user_state[user_id]
+        update.callback_query.answer("Ticket created!")
+    show_main_menu(update, context)
+
+def show_tickets(update: Update, context: CallbackContext):
+    delete_previous_message(update, context)
+    user_id = update.effective_user.id
+    tickets = get_user_tickets(user_id)
+    if not tickets:
+        text = "No tickets found."
+    else:
+        text = ""
+        for t in tickets:
+            text += f"Ticket {t['ticket_id']} - {t['league']}:\n" + "\n".join(t['matches']) + "\n\n"
+    keyboard = [[InlineKeyboardButton("Back", callback_data="main_menu")]]
+    update.callback_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
