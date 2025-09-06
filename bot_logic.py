@@ -1,4 +1,4 @@
-from db import add_user, get_user_plan, add_ticket, get_user_tickets, add_match_prediction
+from db import add_user, get_user_plan, get_user_tickets, add_match_prediction, can_create_prediction, add_ticket
 from football_api import get_leagues, get_matches
 
 def start(update, context):
@@ -9,29 +9,26 @@ def start(update, context):
 def show_main_menu(update, context):
     keyboard = [
         [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
-        [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
-        [{"text": "VIP Monthly 👑", "callback_data": "plan_vip"}],
         [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
     ]
-    message = "Benvenuto! Scegli un piano o controlla le tue schedine:"
+    message = ("Benvenuto! Scegli il Free Plan per creare fino a 5 pronostici al giorno.\n\n"
+               "Clicca Free Plan per leggere la guida.")
     return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_plan_info(update, context, plan):
-    if plan == "free":
-        text = "🆓 **Free Plan:** fino a 5 partite per schedina."
-    elif plan == "2eur":
-        text = "💶 **2€ Pack:** più partite disponibili, funzionalità extra!"
-    else:
-        text = "👑 **VIP:** massimo 20 partite, aggiornamenti e supporto VIP."
-
+    message = ("🆓 **Free Plan:** ogni giorno puoi creare fino a 5 pronostici.\n"
+               "1️⃣ Seleziona 'Scegli campionato' o 'Nazioni'\n"
+               "2️⃣ Scegli le partite reali\n"
+               "3️⃣ Seleziona il pronostico 1/X/2\n"
+               "4️⃣ Conferma la schedina")
     keyboard = [
-        [{"text": "Scegli campionato ⚽", "callback_data": f"select_league_{plan}"}],
+        [{"text": "Scegli campionato o nazionali ⚽", "callback_data": f"select_league_{plan}"}],
         [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
     ]
-    return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
+    return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_leagues(update, context, plan):
-    leagues = get_leagues()  # Nazionali + campionati
+    leagues = get_leagues()  # Campionati + Nazionali
     keyboard = [[{"text": l["name"], "callback_data": f"league_{l['id']}_{plan}"}] for l in leagues[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
     return {"text": "Seleziona un campionato o una nazionale:", "reply_markup": {"inline_keyboard": keyboard}}
@@ -50,13 +47,12 @@ def show_matches(update, context, league_id, plan):
     return {"text": "Seleziona i pronostici per le partite:", "reply_markup": {"inline_keyboard": keyboard}}
 
 def save_prediction(user_id, match_id, prediction):
-    add_match_prediction(user_id, match_id, prediction)
-    return {"text": f"Pronostico salvato: {prediction}"}
+    if add_match_prediction(user_id, match_id, prediction):
+        return {"text": f"Pronostico salvato: {prediction}"}
+    else:
+        return {"text": "Hai già creato 5 pronostici oggi, riprova domani!"}
 
 def create_ticket(user_id, match_ids):
-    plan = get_user_plan(user_id)
-    if len(match_ids) > 5 and plan == "free":
-        match_ids = match_ids[:5]
     add_ticket(user_id, match_ids)
     return {"text": f"Schedina creata con {len(match_ids)} partite!"}
 
@@ -67,5 +63,5 @@ def show_user_tickets(update, context):
         return {"text": "Non hai ancora schedine create."}
     text = "Le tue schedine:\n\n"
     for idx, t in enumerate(tickets, start=1):
-        text += f"{idx}. Partite: {t['match_ids']}\n"
+        text += f"{idx}. Partite: {t['match_ids']} ({t['date_created']})\n"
     return {"text": text}
