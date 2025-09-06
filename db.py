@@ -1,71 +1,65 @@
 import sqlite3
 from datetime import datetime, timedelta
 
-DB_FILE = "football_bot.db"
+DB_FILE = "database.db"
+
+def get_connection():
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    # Utenti
-    c.execute("""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        created_at TEXT
-    )
-    """)
-
-    # Tickets / pronostici
-    c.execute("""
+        user_id INTEGER PRIMARY KEY
+    )""")
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS tickets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
         match_id INTEGER,
         created_at TEXT
-    )
-    """)
-
+    )""")
     conn.commit()
     conn.close()
 
 def add_user(user_id):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)", 
-              (user_id, datetime.utcnow().isoformat()))
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO users(user_id) VALUES (?)", (user_id,))
     conn.commit()
     conn.close()
 
-def add_ticket(user_id, match_ids):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    for match_id in match_ids:
-        c.execute("INSERT INTO tickets (user_id, match_id, created_at) VALUES (?, ?, ?)",
-                  (user_id, match_id, datetime.utcnow().isoformat()))
+def add_ticket(user_id, match_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO tickets(user_id, match_id, created_at) VALUES (?, ?, ?)",
+        (user_id, match_id, datetime.utcnow().isoformat())
+    )
     conn.commit()
     conn.close()
 
 def get_user_tickets(user_id):
-    """Restituisce solo i ticket fatti oggi"""
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    c.execute("SELECT match_id FROM tickets WHERE user_id=? AND created_at>=?", 
-              (user_id, today_start.isoformat()))
-    rows = c.fetchall()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM tickets WHERE user_id = ?", (user_id,))
+    rows = cursor.fetchall()
     conn.close()
-    return [r[0] for r in rows]
+    return [dict(row) for row in rows]
 
-def can_add_prediction(user_id):
-    """Verifica se l'utente può aggiungere un pronostico oggi (max 5)"""
-    tickets_today = get_user_tickets(user_id)
-    return len(tickets_today) < 5
-
-def delete_old_tickets():
-    """Pulizia dei ticket vecchi di più di 1 giorno"""
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    yesterday = datetime.utcnow() - timedelta(days=1)
-    c.execute("DELETE FROM tickets WHERE created_at<?", (yesterday.isoformat(),))
-    conn.commit()
+def can_create_prediction(user_id, max_per_day=5):
+    conn = get_connection()
+    cursor = conn.cursor()
+    today = datetime.utcnow().date()
+    start_day = datetime.combine(today, datetime.min.time())
+    end_day = datetime.combine(today, datetime.max.time())
+    cursor.execute("""
+        SELECT COUNT(*) as count FROM tickets
+        WHERE user_id = ? AND created_at BETWEEN ? AND ?
+    """, (user_id, start_day.isoformat(), end_day.isoformat()))
+    count = cursor.fetchone()["count"]
     conn.close()
+    return count < max_per_day
