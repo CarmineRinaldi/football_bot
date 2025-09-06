@@ -47,4 +47,21 @@ def show_leagues(update, context, plan):
         [{"text": f"{l['league']['name']} {l['country']['flag']}", "callback_data": f"league_{l['league']['id']}_{plan}"}]
         for l in leagues[:20]
     ]
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"p_]()
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
+    return {"text": "Seleziona un campionato reale:", "reply_markup": {"inline_keyboard": keyboard}}
+
+def show_matches(update, context, league_id, plan):
+    matches = get_matches(league_id)
+    keyboard = [
+        [{"text": f"{m['fixture']['home']['name']} 🆚 {m['fixture']['away']['name']}", 
+          "callback_data": f"match_{m['fixture']['id']}"}] 
+        for m in matches[:20]
+    ]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
+    return {"text": "Seleziona le partite per la tua schedina:", "reply_markup": {"inline_keyboard": keyboard}}
+
+def create_ticket(user_id, match_ids):
+    if len(match_ids) > 5 and get_user_plan(user_id) == "free":
+        match_ids = match_ids[:5]
+    add_ticket(user_id, match_ids)
+    return {"text": f"Schedina creata con {len(match_ids)} partite!"}
