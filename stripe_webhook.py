@@ -1,20 +1,25 @@
-import os
+from fastapi import APIRouter, Request, HTTPException
 import stripe
-from db import add_user
+import os
 
+router = APIRouter()
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-ENDPOINT_SECRET = os.getenv("STRIPE_ENDPOINT_SECRET")
+endpoint_secret = os.getenv("STRIPE_ENDPOINT_SECRET")
 
-def handle_stripe_event(payload, sig_header):
+@router.post("/stripe_webhook")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, ENDPOINT_SECRET)
-    except stripe.error.SignatureVerificationError:
-        return {"status": 400}
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        user_id = int(session["client_reference_id"])
-        price_id = session["display_items"][0]["price"]["id"]
-        plan = "2eur" if price_id == os.getenv("STRIPE_PRICE_2EUR") else "vip"
-        add_user(user_id, plan)
-    return {"status": 200}
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        # qui logica per aggiornare utente a VIP
+        user_id = int(session['client_reference_id'])
+        from db import add_user
+        add_user(user_id, "vip")
+
+    return {"status": "success"}
