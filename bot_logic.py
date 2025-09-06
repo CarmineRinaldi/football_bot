@@ -31,7 +31,7 @@ def show_plan_info(update, context, plan):
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_leagues(update, context, plan):
-    leagues = get_leagues()  # Lista campionati nazionali + nazionali
+    leagues = get_leagues()  # Nazionali + campionati
     keyboard = [[{"text": l["name"], "callback_data": f"league_{l['id']}_{plan}"}] for l in leagues[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
     return {"text": "Seleziona un campionato o una nazionale:", "reply_markup": {"inline_keyboard": keyboard}}
