@@ -1,98 +1,97 @@
 import os
-import stripe
-import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, CallbackContext
+from db import init_db, add_user, get_user, update_matches
+from stripe_handler import handle_stripe_event
+from football import get_leagues, get_matches
 
-from db import add_user, get_user
+TOKEN = os.getenv("TG_BOT_TOKEN")
+FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
+VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
 
-# === ENV ===
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_PRICE_2EUR = os.getenv("STRIPE_PRICE_2EUR")
-STRIPE_PRICE_VIP = os.getenv("STRIPE_PRICE_VIP")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+# Inizializza DB
+init_db()
 
-# Stripe setup
-stripe.api_key = STRIPE_SECRET_KEY
-
-# FastAPI
+# FastAPI per webhook Stripe
 app = FastAPI()
 
-# Telegram Bot
-bot_app = Application.builder().token(TG_BOT_TOKEN).build()
+@app.post("/webhook")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    return handle_stripe_event(payload, sig_header)
 
-# === Commands ===
-async def start(update: Update, context):
+# Telegram bot
+application = Application.builder().token(TOKEN).build()
+
+async def start(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    add_user(user_id)
+
     keyboard = [
-        [InlineKeyboardButton("📊 Leagues", callback_data="leagues")],
-        [InlineKeyboardButton("🎮 Matches", callback_data="matches")],
-        [InlineKeyboardButton("💎 Diventa VIP", callback_data="vip")]
+        [InlineKeyboardButton("⚽ Campionati", callback_data="leagues")],
+        [InlineKeyboardButton("💎 Diventa VIP", callback_data="vip")],
+        [InlineKeyboardButton("ℹ️ Aiuto", callback_data="help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "⚽ Benvenuto su *FootballX Bot*! 🔥\n\n"
-        "👉 Qui puoi seguire partite e campionati in tempo reale.\n"
-        "Vuoi iniziare subito?",
-        parse_mode="Markdown",
-        reply_markup=reply_markup
+        f"Ciao {update.effective_user.first_name}! 👋\n\n"
+        "Benvenuto nel bot ⚽ *Football Matches*!\n\n"
+        "👉 Con il piano gratuito puoi vedere fino a "
+        f"{FREE_MAX_MATCHES} partite.\n"
+        "👉 Con il piano VIP ottieni fino a "
+        f"{VIP_MAX_MATCHES} partite + accesso prioritario!\n\n"
+        "Scegli un'opzione dal menu qui sotto 👇",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
     )
 
-async def help_cmd(update: Update, context):
+async def help_command(update: Update, context: CallbackContext):
     await update.message.reply_text(
-        "ℹ️ Ecco i comandi disponibili:\n\n"
-        "/start - Menù principale\n"
-        "/help - Mostra questo messaggio\n"
-        "/leagues - Lista dei campionati\n"
-        "/matches - Partite disponibili\n"
-        "/vip - Scopri i vantaggi VIP\n"
-        "/profile - Il tuo profilo"
+        "ℹ️ *Come funziona il bot*\n\n"
+        "• /start → Messaggio di benvenuto\n"
+        "• /leagues → Mostra i campionati disponibili\n"
+        "• /matches <league_id> → Mostra le prossime partite\n"
+        "• /vip → Informazioni sull'abbonamento VIP\n"
+        "• /tickets → Controlla quante partite hai usato\n",
+        parse_mode="Markdown"
     )
 
-async def profile(update: Update, context):
-    user = get_user(update.message.from_user.id)
-    plan = user["plan"] if user else "free"
+async def vip_command(update: Update, context: CallbackContext):
     await update.message.reply_text(
-        f"👤 Profilo:\nID: {update.message.from_user.id}\n"
-        f"Piano attuale: {plan.upper()}"
+        "💎 *Diventa VIP!*\n\n"
+        "Con l'abbonamento VIP ottieni:\n"
+        f"✅ Fino a {VIP_MAX_MATCHES} partite\n"
+        "✅ Accesso prioritario\n"
+        "✅ Supporto dedicato\n\n"
+        "👉 Per abbonarti vai su /start e clicca *Diventa VIP*!",
+        parse_mode="Markdown"
     )
 
-# === Callbacks ===
-async def button_handler(update: Update, context):
-    query = update.callback_query
-    await query.answer()
+async def tickets_command(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    max_matches = VIP_MAX_MATCHES if user["plan"] == "vip" else FREE_MAX_MATCHES
+    await update.message.reply_text(
+        f"🎟️ Hai usato {user['matches_used']} partite su {max_matches} disponibili.\n"
+        f"Il tuo piano attuale è: *{user['plan'].upper()}*",
+        parse_mode="Markdown"
+    )
 
-    if query.data == "leagues":
-        await query.edit_message_text("📊 Lista campionati in arrivo...")
-    elif query.data == "matches":
-        await query.edit_message_text("🎮 Partite disponibili...")
-    elif query.data == "vip":
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{"price": STRIPE_PRICE_VIP, "quantity": 1}],
-            mode="subscription",
-            success_url=WEBHOOK_URL,
-            cancel_url=WEBHOOK_URL,
-            client_reference_id=str(query.from_user.id)
-        )
-        await query.edit_message_text(
-            "💎 Diventa VIP per sbloccare tutte le funzionalità!\n"
-            f"[👉 Abbonati qui]({session.url})",
-            parse_mode="Markdown"
-        )
+# Aggiungi comandi
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("help", help_command))
+application.add_handler(CommandHandler("vip", vip_command))
+application.add_handler(CommandHandler("tickets", tickets_command))
 
-# === Handlers ===
-bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CommandHandler("help", help_cmd))
-bot_app.add_handler(CommandHandler("profile", profile))
-bot_app.add_handler(CallbackQueryHandler(button_handler))
+# Funzione per avviare bot e FastAPI insieme
+def run():
+    import uvicorn
+    from threading import Thread
+    Thread(target=lambda: application.run_polling()).start()
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
 
-# === Webhook (FastAPI) ===
-@app.post("/webhook")
-async def webhook(request: Request):
-    payload = await request.json()
-    update = Update.de_json(payload, bot_app.bot)
-    await bot_app.process_update(update)
-    return JSONResponse(content={"status": "ok"})
+if __name__ == "__main__":
+    run()
