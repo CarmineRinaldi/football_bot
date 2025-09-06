@@ -1,96 +1,70 @@
-import os
-import httpx
-from fastapi import FastAPI, Request
-from db import init_db, delete_old_tickets, get_user_tickets
-from bot_logic import (
-    start, show_main_menu, show_plan_info, show_leagues, show_matches, show_my_tickets
-)
-from stripe_webhook import handle_stripe_event
+from typing import Dict, Any
+import json
 
-# inizializza DB e pulizia schedine vecchie
-init_db()
-delete_old_tickets()
+# Campionati reali
+LEAGUES = {
+    "serie_a": "Serie A 🇮🇹",
+    "premier": "Premier League 🏴",
+    "laliga": "La Liga 🇪🇸",
+    "bundesliga": "Bundesliga 🇩🇪",
+    "ligue1": "Ligue 1 🇫🇷",
+    "champions": "Champions League 🏆",
+    "italy_nat": "Nazionale Italia 🇮🇹"
+}
 
-app = FastAPI()
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-BASE_URL = f"https://api.telegram.org/bot{TG_BOT_TOKEN}"
+async def handle_update(update: Dict[str, Any]):
+    if "message" in update and "text" in update["message"]:
+        text = update["message"]["text"]
+        chat_id = update["message"]["chat"]["id"]
+        return await start(chat_id)
+    elif "callback_query" in update:
+        data = update["callback_query"]["data"]
+        chat_id = update["callback_query"]["message"]["chat"]["id"]
+        return await handle_callback(chat_id, data)
 
-async def send_message(chat_id, text, reply_markup=None):
-    async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/sendMessage", json={
-            "chat_id": chat_id,
-            "text": text,
-            "reply_markup": reply_markup
-        })
 
-async def delete_message(chat_id, message_id):
-    async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/deleteMessage", json={
-            "chat_id": chat_id,
-            "message_id": message_id
-        })
+async def start(chat_id):
+    text = "🎉 Benvenuto nel tuo bot calcistico super divertente! ⚽\n" \
+           "Scegli un piano e iniziamo a creare le tue schedine!"
+    keyboard = [
+        [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
+        [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
+        [{"text": "VIP Monthly 👑", "callback_data": "plan_vip"}],
+        [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
+    ]
+    reply_markup = {"inline_keyboard": keyboard}
+    return {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
 
-@app.get("/")
-async def root():
-    return {"status": "Bot online!"}
 
-@app.post("/webhook")
-async def telegram_webhook(req: Request):
-    data = await req.json()
-    print("Webhook ricevuto:", data)
+async def handle_callback(chat_id, data):
+    if data == "plan_free":
+        return await show_plan_info(chat_id, "free")
+    elif data == "plan_2eur":
+        return await show_plan_info(chat_id, "2eur")
+    elif data == "plan_vip":
+        return await show_plan_info(chat_id, "vip")
+    elif data == "my_tickets":
+        return await show_my_tickets(chat_id)
+    elif data.startswith("select_league_"):
+        plan = data.split("_")[-1]
+        return await show_leagues(chat_id, plan)
+    elif data.startswith("league_"):
+        league_id = data.split("_", 1)[1]
+        return await show_matches(chat_id, league_id)
+    elif data == "main_menu":
+        return await start(chat_id)
+    else:
+        return {"chat_id": chat_id, "text": "Comando non riconosciuto!"}
 
-    if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        message_id = data["message"]["message_id"]
-        text = data["message"].get("text", "")
 
-        if text == "/start":
-            await delete_message(chat_id, message_id)
-            response = start(data, None)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-    elif "callback_query" in data:
-        cb = data["callback_query"]
-        chat_id = cb["message"]["chat"]["id"]
-        message_id = cb["message"]["message_id"]
-        cb_data = cb["data"]
-
-        await delete_message(chat_id, message_id)
-
-        # Menu principale
-        if cb_data == "main_menu":
-            response = show_main_menu(cb, None)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # Piani
-        elif cb_data in ["plan_free", "plan_2eur", "plan_vip"]:
-            plan = cb_data.split("_")[1]
-            response = show_plan_info(cb, None, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # Seleziona campionato
-        elif cb_data.startswith("select_league_"):
-            plan = cb_data.split("_")[-1]
-            response = show_leagues(cb, None, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # Mostra partite
-        elif cb_data.startswith("league_"):
-            parts = cb_data.split("_")
-            league_id = int(parts[1])
-            plan = parts[2]
-            response = show_matches(cb, None, league_id, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # Le mie schedine
-        elif cb_data == "my_tickets":
-            response = show_my_tickets(cb, None)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-    return {"status": 200}
-
-@app.post("/stripe_webhook")
-async def stripe_webhook(req: Request):
-    payload = await req.body()
-    sig_header = req.headers.get("stripe-signature")
-    return handle_stripe_event(payload, sig_header)
+async def show_plan_info(chat_id, plan):
+    if plan == "free":
+        text = "🆓 **Free Plan:** puoi creare fino a 5 partite per schedina. Scegli il tuo campionato preferito e divertiti!"
+        keyboard = [
+            [{"text": "Scegli Campionato ⚽", "callback_data": "select_league_free"}],
+            [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
+        ]
+    else:
+        # Link di esempio Stripe
+        text = f"💳 **{plan.upper()} Plan:** clicca per procedere al pagamento!"
+        link = "https://buy.stripe.com/test_link"  # sostituire con link reale
