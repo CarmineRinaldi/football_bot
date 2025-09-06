@@ -1,45 +1,37 @@
 import os
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from bot_logic import start, show_main_menu, show_leagues, show_matches, create_ticket
-from football_api import get_leagues, get_matches
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler
+from bot_logic import start, show_main_menu, show_leagues, select_league, select_match, finish_ticket, show_tickets
 from stripe_webhook import handle_stripe_event
+from dotenv import load_dotenv
 
+load_dotenv()
+
+TOKEN = os.getenv("TG_BOT_TOKEN")
 app = FastAPI()
 
-# ROUTE PER IL BOT (TELEGRAM)
-@app.post("/telegram_webhook")
-async def telegram_webhook(req: Request):
-    data = await req.json()
-    # Qui puoi gestire i messaggi in arrivo
-    # ad esempio chiamando la funzione start() o altre funzioni del bot
-    return JSONResponse({"status": "ok"})
+bot_app = ApplicationBuilder().token(TOKEN).build()
 
-# ROUTE PER FOOTBALL
-@app.get("/leagues")
-async def leagues():
-    leagues_data = get_leagues()
-    return JSONResponse(leagues_data)
+# Commandi
+bot_app.add_handler(CommandHandler("start", start))
 
-@app.get("/matches")
-async def matches(league_id: int):
-    matches_data = get_matches(league_id)
-    return JSONResponse(matches_data)
+# CallbackQueryHandler
+bot_app.add_handler(CallbackQueryHandler(show_main_menu, pattern="^main_menu$"))
+bot_app.add_handler(CallbackQueryHandler(show_leagues, pattern="^show_leagues$"))
+bot_app.add_handler(CallbackQueryHandler(select_league, pattern="^select_league_"))
+bot_app.add_handler(CallbackQueryHandler(select_match, pattern="^select_match_"))
+bot_app.add_handler(CallbackQueryHandler(finish_ticket, pattern="^finish_ticket$"))
+bot_app.add_handler(CallbackQueryHandler(show_tickets, pattern="^show_tickets$"))
 
-# ROUTE PER STRIPE WEBHOOK
 @app.post("/stripe_webhook")
-async def stripe_webhook(req: Request):
-    payload = await req.body()
-    sig_header = req.headers.get("stripe-signature")
-    response = handle_stripe_event(payload, sig_header)
-    return JSONResponse(response)
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    return handle_stripe_event(payload, sig_header)
 
-# ROUTE DI TEST PRINCIPALE
-@app.get("/")
-async def root():
-    return {"message": "Server attivo"}
-
-# Se vuoi eseguire il bot all'avvio del server
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), reload=True)
+@app.post("/telegram_webhook")
+async def telegram_webhook(update: dict):
+    upd = Update.de_json(update, bot_app.bot)
+    await bot_app.process_update(upd)
+    return {"status": "ok"}
