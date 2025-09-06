@@ -1,15 +1,12 @@
-import os
-import requests
-
-API_KEY = os.getenv("API_FOOTBALL_KEY")
-BASE_URL = "https://v3.football.api-sports.io"
-
+# Mock API
 def get_leagues():
-    headers = {"X-Auth-Token": API_KEY}
-    res = requests.get(f"{BASE_URL}/leagues", headers=headers)
-    return res.json().get("response", [])
+    return ["Serie A", "Premier League", "La Liga"]
 
-def get_matches(league_id):
-    headers = {"X-Auth-Token": API_KEY}
-    res = requests.get(f"{BASE_URL}/fixtures?league={league_id}&season=2025", headers=headers)
-    return res.json().get("response", [])
+def get_matches(league):
+    if league == "Serie A":
+        return [{"id": "1", "home": "Juventus", "away": "Inter"}, {"id": "2", "home": "Milan", "away": "Napoli"}]
+    elif league == "Premier League":
+        return [{"id": "3", "home": "Manchester Utd", "away": "Chelsea"}, {"id": "4", "home": "Arsenal", "away": "Liverpool"}]
+    elif league == "La Liga":
+        return [{"id": "5", "home": "Real Madrid", "away": "Barcelona"}, {"id": "6", "home": "Atletico", "away": "Sevilla"}]
+    return []
