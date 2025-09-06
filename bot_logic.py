@@ -1,51 +1,70 @@
-from db import add_user, get_user_tickets, add_ticket, can_add_prediction
-from football_api import get_leagues, get_matches, get_national_teams
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import CallbackContext
+from football_api import get_leagues, get_matches
+from db import add_user, get_user_tickets, add_ticket, can_create_prediction
+import datetime
 
-def start(update, context):
-    user_id = update["message"]["from"]["id"]
-    add_user(user_id)
-    return show_main_menu(update, context)
+# Menu principale
+def start(update: Update, context: CallbackContext):
+    user = update.effective_user
+    add_user(user.id)  # aggiungi utente al DB se non esiste
 
-def show_main_menu(update, context):
     keyboard = [
-        [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
-        [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
+        [InlineKeyboardButton("Scegli Campionato", callback_data="choose_league")],
+        [InlineKeyboardButton("Nazionali", callback_data="choose_national")],
+        [InlineKeyboardButton("Le mie schedine", callback_data="my_tickets")]
     ]
-    message = "Benvenuto! Scegli un piano o controlla le tue schedine:"
-    return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text(
+        "Benvenuto! Scegli un'opzione:", reply_markup=reply_markup
+    )
 
-def show_plan_info(update, context, plan):
-    text = ("🆓 **Free Plan**: puoi fare fino a 5 pronostici al giorno.\n"
-            "Scegli tra Campionati o Nazionali e seleziona le partite per la tua schedina.")
-    keyboard = [
-        [{"text": "Scegli Campionato", "callback_data": "choose_league"}],
-        [{"text": "Nazionali", "callback_data": "choose_national"}],
-        [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
-    ]
-    return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
+# Gestione dei callback dei bottoni
+def button(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    user_id = query.from_user.id
 
-def show_leagues(update, context):
-    leagues = get_leagues()
-    keyboard = [[{"text": l["league"]["name"], "callback_data": f"league_{l['league']['id']}"}] for l in leagues[:20]]
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": "plan_free"}])
-    return {"text": "Seleziona un campionato:", "reply_markup": {"inline_keyboard": keyboard}}
+    if query.data == "choose_league":
+        leagues = get_leagues()
+        keyboard = [[InlineKeyboardButton(l['league']['name'], callback_data=f"league_{l['league']['id']}")] for l in leagues[:10]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text("Scegli un campionato:", reply_markup=reply_markup)
 
-def show_national_teams(update, context):
-    teams = get_national_teams()
-    keyboard = [[{"text": t["name"], "callback_data": f"team_{t['id']}"}] for t in teams[:20]]
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": "plan_free"}])
-    return {"text": "Seleziona una nazionale:", "reply_markup": {"inline_keyboard": keyboard}}
+    elif query.data.startswith("league_"):
+        league_id = int(query.data.split("_")[1])
+        matches = get_matches(league_id)
+        keyboard = []
+        for m in matches[:10]:
+            home = m['fixture']['home']['name']
+            away = m['fixture']['away']['name']
+            keyboard.append([InlineKeyboardButton(f"{home} vs {away}", callback_data=f"match_{m['fixture']['id']}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text("Scegli una partita:", reply_markup=reply_markup)
 
-def show_matches(update, context, league_id):
-    matches = get_matches(league_id)
-    keyboard = [[{"text": f"{m['home']} vs {m['away']}", "callback_data": f"team_{m['id']}"}] for m in matches[:20]]
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": "choose_league"}])
-    return {"text": "Seleziona le partite per la schedina:", "reply_markup": {"inline_keyboard": keyboard}}
+    elif query.data.startswith("match_"):
+        match_id = int(query.data.split("_")[1])
+        # Controllo limite pronostici giornalieri
+        if can_create_prediction(user_id, max_per_day=5):
+            add_ticket(user_id, match_id)
+            query.edit_message_text("Pronostico registrato! Puoi farne massimo 5 al giorno.")
+        else:
+            query.edit_message_text("Hai già raggiunto il limite di 5 pronostici per oggi.")
 
-def make_prediction(update, context, match_id):
-    user_id = update["callback_query"]["from"]["id"]
-    if not can_add_prediction(user_id):
-        return {"text": "Hai già fatto 5 pronostici oggi. Riprova domani!"}
+    elif query.data == "choose_national":
+        matches = get_matches(national=True)
+        keyboard = []
+        for m in matches[:10]:
+            home = m['fixture']['home']['name']
+            away = m['fixture']['away']['name']
+            keyboard.append([InlineKeyboardButton(f"{home} vs {away}", callback_data=f"match_{m['fixture']['id']}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text("Scegli una nazionale:", reply_markup=reply_markup)
 
-    add_ticket(user_id, [match_id])
-    return {"text": f"Pronostico registrato! Puoi fare ancora {5 - len(get_user_tickets(user_id))} pronostici oggi."}
+    elif query.data == "my_tickets":
+        tickets = get_user_tickets(user_id)
+        if tickets:
+            text = "Le tue schedine:\n" + "\n".join([f"{t['match']}" for t in tickets])
+        else:
+            text = "Non hai ancora schedine."
+        query.edit_message_text(text)
