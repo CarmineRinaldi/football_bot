@@ -1,92 +1,106 @@
-from fastapi import FastAPI, Request
-import httpx
 import os
+import asyncio
+import httpx
+from fastapi import FastAPI, Request
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # assicurati di settare BOT_TOKEN nelle variabili d'ambiente
-BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+# ======================================================
+# Configurazioni
+# ======================================================
+BASE_URL = f"https://api.telegram.org/bot{os.getenv('TELEGRAM_TOKEN')}"
 
 app = FastAPI()
-last_messages = {}  # per salvare l'ultimo messaggio inviato per ogni chat
 
+# ======================================================
+# Funzioni Helper
+# ======================================================
+async def send_message(chat_id, text, reply_markup=None):
+    """Invio sicuro di messaggi Telegram con gestione errori."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(f"{BASE_URL}/sendMessage", json={
+                "chat_id": chat_id,
+                "text": text,
+                "reply_markup": reply_markup,
+                "parse_mode": "Markdown"
+            })
+    except httpx.RequestError as e:
+        print(f"Errore invio messaggio a Telegram: {e}")
 
-async def send_message(chat_id: int, text: str, reply_markup=None):
-    """
-    Invia un messaggio al bot Telegram e cancella il precedente se esiste
-    """
-    # cancella messaggio precedente
-    if chat_id in last_messages:
-        try:
-            await httpx.AsyncClient().post(
-                f"{BASE_URL}/deleteMessage",
-                json={"chat_id": chat_id, "message_id": last_messages[chat_id]},
-                timeout=10.0
-            )
-        except Exception:
-            pass  # se fallisce, ignoriamo
+def get_main_menu():
+    """Menu principale con piani e schedine."""
+    return {
+        "text": "🎉 Benvenuto nel tuo bot calcistico super divertente! ⚽\nScegli un piano e iniziamo a creare le tue schedine!",
+        "reply_markup": {
+            "inline_keyboard": [
+                [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
+                [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
+                [{"text": "VIP Monthly 👑", "callback_data": "plan_vip"}],
+                [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
+            ]
+        }
+    }
 
-    # invia nuovo messaggio
-    data = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-    if reply_markup:
-        data["reply_markup"] = reply_markup
+def get_free_plan_menu():
+    return {
+        "text": "🆓 **Free Plan:** puoi creare fino a 5 partite per schedina. Scegli il tuo campionato preferito e divertiti!",
+        "reply_markup": {
+            "inline_keyboard": [
+                [{"text": "Scegli Campionato ⚽", "callback_data": "select_league_free"}],
+                [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
+            ]
+        }
+    }
 
-    resp = await httpx.AsyncClient().post(f"{BASE_URL}/sendMessage", json=data, timeout=10.0)
-    result = resp.json()
-    if result.get("ok"):
-        last_messages[chat_id] = result["result"]["message_id"]
-    return result
+def get_select_league_menu():
+    # Esempio di campionati disponibili
+    leagues = ["Serie A 🇮🇹", "Premier League 🇬🇧", "La Liga 🇪🇸", "Bundesliga 🇩🇪"]
+    keyboard = [[{"text": league, "callback_data": f"league_{league}"}] for league in leagues]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": "plan_free"}])
+    return {
+        "text": "Seleziona il campionato che vuoi per la tua schedina:",
+        "reply_markup": {"inline_keyboard": keyboard}
+    }
 
-
+# ======================================================
+# Gestione Webhook
+# ======================================================
 @app.post("/webhook")
-async def telegram_webhook(request: Request):
-    update = await request.json()
-    print("Webhook ricevuto:", update)
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    try:
+        if "message" in data:
+            message = data["message"]
+            chat_id = message["chat"]["id"]
+            text = message.get("text", "")
 
-    chat_id = None
-    response = {"text": "Errore inatteso!", "reply_markup": None}
+            if text == "/start":
+                await send_message(chat_id, **get_main_menu())
 
-    # gestione messaggio testuale
-    if "message" in update and "text" in update["message"]:
-        chat_id = update["message"]["chat"]["id"]
-        text = update["message"]["text"]
+        elif "callback_query" in data:
+            callback = data["callback_query"]
+            chat_id = callback["from"]["id"]
+            data_cb = callback["data"]
 
-        if text == "/start":
-            response["text"] = "🎉 Benvenuto nel tuo bot calcistico super divertente! ⚽\nScegli un piano e iniziamo!"
-            response["reply_markup"] = {
-                "inline_keyboard": [
-                    [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
-                    [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
-                    [{"text": "VIP Monthly 👑", "callback_data": "plan_vip"}],
-                    [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
-                ]
-            }
+            # ==================================================
+            # Gestione piani
+            # ==================================================
+            if data_cb == "main_menu":
+                await send_message(chat_id, **get_main_menu())
+            elif data_cb == "plan_free":
+                await send_message(chat_id, **get_free_plan_menu())
+            elif data_cb == "select_league_free":
+                await send_message(chat_id, **get_select_league_menu())
+            elif data_cb.startswith("league_"):
+                league_name = data_cb.replace("league_", "")
+                await send_message(chat_id, f"Hai scelto il campionato: {league_name}\nProssimo passo: scegli le partite!")
+            elif data_cb == "plan_2eur":
+                await send_message(chat_id, "💶 **2€ Pack:** Prossimamente qui potrai pagare tramite Stripe!")
+            elif data_cb == "plan_vip":
+                await send_message(chat_id, "👑 **VIP Monthly:** Prossimamente abbonamento mensile!")
+            elif data_cb == "my_tickets":
+                await send_message(chat_id, "📋 Ecco le tue schedine salvate (funzione in sviluppo).")
 
-    # gestione callback inline
-    elif "callback_query" in update:
-        query = update["callback_query"]
-        chat_id = query["from"]["id"]
-        data = query["data"]
-
-        if data == "plan_free":
-            response["text"] = "🆓 **Free Plan:** puoi creare fino a 5 partite per schedina. Scegli il tuo campionato preferito!"
-            response["reply_markup"] = {
-                "inline_keyboard": [
-                    [{"text": "Scegli Campionato ⚽", "callback_data": "select_league_free"}],
-                    [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
-                ]
-            }
-        elif data == "main_menu":
-            response["text"] = "🎯 Menu principale"
-            response["reply_markup"] = {
-                "inline_keyboard": [
-                    [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
-                    [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
-                    [{"text": "VIP Monthly 👑", "callback_data": "plan_vip"}],
-                    [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
-                ]
-            }
-        # aggiungi qui altri callback (schedine, piani VIP, campionati...)
-
-    if chat_id:
-        await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-    return {"ok": True}
+        return {"ok": True}
+    except Exception as e:
+        print(f"Errore nella gestione del webhook: {e}")
+        return {"ok": False, "error": str(e)}
