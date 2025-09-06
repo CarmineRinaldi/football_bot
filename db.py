@@ -1,69 +1,82 @@
-# bot_logic.py
-from db import add_user, get_user_plan, add_ticket, get_user_tickets, add_match_prediction
-from football_api import get_leagues, get_matches, get_national_teams
+# db.py
+import sqlite3
+from datetime import datetime, timedelta
 
-def start(update, context):
-    user_id = update["message"]["from"]["id"]
-    add_user(user_id)
-    return show_main_menu(update, context)
+DB_FILE = "football_bot.db"
 
-def show_main_menu(update, context):
-    keyboard = [
-        [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
-        [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
-        [{"text": "VIP Monthly 👑", "callback_data": "plan_vip"}],
-        [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
-    ]
-    message = "Benvenuto! Scegli un piano o controlla le tue schedine:"
-    return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
+def get_conn():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-def show_plan_info(update, context, plan):
-    if plan == "free":
-        text = "🆓 Free Plan: puoi creare fino a 5 partite per schedina."
-    elif plan == "2eur":
-        text = "💶 2€ Pack: più partite disponibili, funzionalità extra!"
-    else:
-        text = "👑 VIP: massimo 20 partite per schedina, aggiornamenti VIP."
-    
-    keyboard = [
-        [{"text": "Scegli campionato ⚽", "callback_data": f"select_league_{plan}"}],
-        [{"text": "Scegli nazionale 🌍", "callback_data": f"select_national_{plan}"}],
-        [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
-    ]
-    return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
+def init_db():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            plan TEXT DEFAULT 'free'
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS ticket_matches (
+            ticket_id INTEGER,
+            match_id INTEGER,
+            prediction TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-def show_leagues(update, context, plan):
-    leagues = get_leagues()
-    keyboard = [[{"text": l["league"]["name"], "callback_data": f"league_{l['league']['id']}_{plan}"}] for l in leagues[:20]]
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    return {"text": "Seleziona un campionato:", "reply_markup": {"inline_keyboard": keyboard}}
+def delete_old_tickets():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM tickets WHERE created_at < ?", (datetime.now() - timedelta(days=7),))
+    conn.commit()
+    conn.close()
 
-def show_national_teams(update, context, plan):
-    teams = get_national_teams()
-    keyboard = [[{"text": t["name"], "callback_data": f"national_{t['id']}_{plan}"}] for t in teams[:20]]
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    return {"text": "Seleziona una nazionale:", "reply_markup": {"inline_keyboard": keyboard}}
+def add_user(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
 
-def show_matches(update, context, league_id, plan):
-    matches = get_matches(league_id)
-    keyboard = []
-    for m in matches[:20]:
-        match_id = m['fixture']['id']
-        text = f"{m['fixture']['home']['name']} vs {m['fixture']['away']['name']}"
-        keyboard.append([{"text": text, "callback_data": f"match_{match_id}_{plan}"}])
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}])
-    return {"text": "Seleziona le partite per la schedina:", "reply_markup": {"inline_keyboard": keyboard}}
+def get_user_plan(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT plan FROM users WHERE id = ?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return row["plan"] if row else "free"
 
-def show_match_options(update, context, match_id, plan):
-    keyboard = [
-        [{"text": "1️⃣ Vittoria casa", "callback_data": f"pred_{match_id}_1"}],
-        [{"text": "❌ Pareggio", "callback_data": f"pred_{match_id}_X"}],
-        [{"text": "2️⃣ Vittoria ospite", "callback_data": f"pred_{match_id}_2"}],
-        [{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}]
-    ]
-    return {"text": "Seleziona il pronostico:", "reply_markup": {"inline_keyboard": keyboard}}
+def add_ticket(user_id, matches):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT INTO tickets (user_id) VALUES (?)", (user_id,))
+    ticket_id = c.lastrowid
+    for match_id, prediction in matches.items():
+        c.execute("INSERT INTO ticket_matches (ticket_id, match_id, prediction) VALUES (?, ?, ?)",
+                  (ticket_id, match_id, prediction))
+    conn.commit()
+    conn.close()
+    return ticket_id
 
-def save_prediction(update, context, match_id, prediction):
-    user_id = update["callback_query"]["from"]["id"]
-    add_match_prediction(user_id, match_id, prediction)
-    return {"text": f"Pronostico salvato: {prediction}"}
+def get_user_tickets(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM tickets WHERE user_id = ?", (user_id,))
+    tickets = c.fetchall()
+    conn.close()
+    return tickets
+
+def add_match_prediction(user_id, match_id, prediction):
+    # Salva la previsione provvisoria per la schedina in creazione
+    return {"status": "ok", "user_id": user_id, "match_id": match_id, "prediction": prediction}
