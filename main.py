@@ -3,10 +3,9 @@ import httpx
 from fastapi import FastAPI, Request
 from db import init_db, delete_old_tickets
 from bot_logic import (
-    start, show_main_menu, show_plan_info, show_leagues, show_matches, 
-    save_prediction, create_ticket, show_user_tickets
+    start, show_main_menu, show_plan_info, 
+    show_leagues, show_national_teams, show_matches, make_prediction
 )
-from stripe_webhook import handle_stripe_event
 
 # Inizializza DB e pulizia schedine vecchie
 init_db()
@@ -43,7 +42,6 @@ async def telegram_webhook(req: Request):
     data = await req.json()
     print("Webhook ricevuto:", data)
 
-    # Messaggi testuali
     if "message" in data and "text" in data["message"]:
         chat_id = data["message"]["chat"]["id"]
         message_id = data["message"]["message_id"]
@@ -54,7 +52,6 @@ async def telegram_webhook(req: Request):
             response = start(data, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
-    # Callback query (inline buttons)
     if "callback_query" in data:
         cb = data["callback_query"]
         chat_id = cb["message"]["chat"]["id"]
@@ -63,58 +60,30 @@ async def telegram_webhook(req: Request):
 
         await delete_message(chat_id, message_id)
 
-        # Menu principale
         if cb_data == "main_menu":
             response = show_main_menu(data, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
-        # Piani
-        elif cb_data in ["plan_free", "plan_2eur", "plan_vip"]:
-            plan = cb_data.split("_")[1]
-            response = show_plan_info(data, None, plan)
+        elif cb_data == "plan_free":
+            response = show_plan_info(data, None, "free")
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
-        # Seleziona campionato
-        elif cb_data.startswith("select_league_"):
-            plan = cb_data.split("_")[-1]
-            response = show_leagues(data, None, plan)
+        elif cb_data == "choose_league":
+            response = show_leagues(data, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
-        # Mostra partite del campionato
+        elif cb_data == "choose_national":
+            response = show_national_teams(data, None)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
+
         elif cb_data.startswith("league_"):
-            parts = cb_data.split("_")
-            league_id = int(parts[1])
-            plan = parts[2]
-            response = show_matches(data, None, league_id, plan)
+            league_id = int(cb_data.split("_")[1])
+            response = show_matches(data, None, league_id)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
-        # Salva pronostico
-        elif cb_data.startswith("predict_"):
-            parts = cb_data.split("_")
-            match_id = int(parts[1])
-            prediction = parts[2]
-            user_id = cb["from"]["id"]
-            response = save_prediction(user_id, match_id, prediction)
-            await send_message(chat_id, response["text"])
-
-        # Conferma schedina
-        elif cb_data.startswith("confirm_ticket_"):
-            plan = cb_data.split("_")[-1]
-            user_id = cb["from"]["id"]
-            # Qui prendi tutte le previsioni salvate per l'utente e crea la schedina
-            match_ids = []  # TODO: recupera gli ID dalle previsioni salvate
-            response = create_ticket(user_id, match_ids)
-            await send_message(chat_id, response["text"])
-
-        # Le mie schedine
-        elif cb_data == "my_tickets":
-            response = show_user_tickets(data, None)
-            await send_message(chat_id, response["text"])
+        elif cb_data.startswith("team_"):
+            match_id = int(cb_data.split("_")[1])
+            response = make_prediction(data, None, match_id)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
 
     return {"status": 200}
-
-@app.post("/stripe_webhook")
-async def stripe_webhook(req: Request):
-    payload = await req.body()
-    sig_header = req.headers.get("stripe-signature")
-    return handle_stripe_event(payload, sig_header)
