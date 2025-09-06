@@ -1,50 +1,53 @@
 import sqlite3
 import os
 
-DATABASE_URL = os.getenv("DATABASE_URL", "users.db")
-conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
-cursor = conn.cursor()
+DATABASE = os.getenv("DATABASE_URL", "users.db")
 
-# Tabelle utenti e ticket
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    plan TEXT
-)
-''')
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS tickets (
-    ticket_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    league TEXT,
-    matches TEXT
-)
-''')
-conn.commit()
-
-# Funzioni DB
-def add_user(user_id: int, plan: str):
-    cursor.execute("INSERT OR REPLACE INTO users (user_id, plan) VALUES (?, ?)", (user_id, plan))
+def init_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            plan TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            match TEXT
+        )
+    ''')
     conn.commit()
+    conn.close()
 
-def get_user_plan(user_id: int):
-    cursor.execute("SELECT plan FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
+def add_user(user_id, plan):
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('INSERT OR REPLACE INTO users (user_id, plan) VALUES (?, ?)', (user_id, plan))
+    conn.commit()
+    conn.close()
+
+def get_user_plan(user_id):
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('SELECT plan FROM users WHERE user_id=?', (user_id,))
+    row = c.fetchone()
+    conn.close()
     return row[0] if row else None
 
-def add_ticket(user_id: int, league: str, matches: list):
-    matches_str = ",".join(matches)
-    cursor.execute("INSERT INTO tickets (user_id, league, matches) VALUES (?, ?, ?)", (user_id, league, matches_str))
+def add_ticket(user_id, match):
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('INSERT INTO tickets (user_id, match) VALUES (?, ?)', (user_id, match))
     conn.commit()
+    conn.close()
 
-def get_user_tickets(user_id: int):
-    cursor.execute("SELECT ticket_id, league, matches FROM tickets WHERE user_id=?", (user_id,))
-    rows = cursor.fetchall()
-    tickets = []
-    for row in rows:
-        tickets.append({
-            "ticket_id": row[0],
-            "league": row[1],
-            "matches": row[2].split(",")
-        })
-    return tickets
+def get_user_tickets(user_id):
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('SELECT match FROM tickets WHERE user_id=?', (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
