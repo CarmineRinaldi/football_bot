@@ -1,105 +1,75 @@
-from typing import Dict, Any
-import json
+from db import add_user, get_user_plan, add_ticket, get_user_tickets
+from football_api import get_leagues, get_matches
 
-# Campionati reali
-LEAGUES = {
-    "serie_a": "Serie A 🇮🇹",
-    "premier": "Premier League 🏴",
-    "laliga": "La Liga 🇪🇸",
-    "bundesliga": "Bundesliga 🇩🇪",
-    "ligue1": "Ligue 1 🇫🇷",
-    "champions": "Champions League 🏆",
-    "italy_nat": "Nazionale Italia 🇮🇹"
-}
+# -----------------------------
+# START BOT
+# -----------------------------
+def start(update, context):
+    user_id = update["message"]["from"]["id"]
+    add_user(user_id)
+    return show_main_menu(update, context)
 
-async def handle_update(update: Dict[str, Any]):
-    if "message" in update and "text" in update["message"]:
-        text = update["message"]["text"]
-        chat_id = update["message"]["chat"]["id"]
-        return await start(chat_id)
-    elif "callback_query" in update:
-        data = update["callback_query"]["data"]
-        chat_id = update["callback_query"]["message"]["chat"]["id"]
-        return await handle_callback(chat_id, data)
-
-
-async def start(chat_id):
-    text = "🎉 Benvenuto nel tuo bot calcistico super divertente! ⚽\n" \
-           "Scegli un piano e iniziamo a creare le tue schedine!"
+# -----------------------------
+# MENU PRINCIPALE
+# -----------------------------
+def show_main_menu(update, context):
     keyboard = [
         [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
         [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
         [{"text": "VIP Monthly 👑", "callback_data": "plan_vip"}],
         [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
     ]
-    reply_markup = {"inline_keyboard": keyboard}
-    return {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
+    message = "Benvenuto! Scegli un piano o controlla le tue schedine:"
+    return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
 
-
-async def handle_callback(chat_id, data):
-    if data == "plan_free":
-        return await show_plan_info(chat_id, "free")
-    elif data == "plan_2eur":
-        return await show_plan_info(chat_id, "2eur")
-    elif data == "plan_vip":
-        return await show_plan_info(chat_id, "vip")
-    elif data == "my_tickets":
-        return await show_my_tickets(chat_id)
-    elif data.startswith("select_league_"):
-        plan = data.split("_")[-1]
-        return await show_leagues(chat_id, plan)
-    elif data.startswith("league_"):
-        league_id = data.split("_", 1)[1]
-        return await show_matches(chat_id, league_id)
-    elif data == "main_menu":
-        return await start(chat_id)
-    else:
-        return {"chat_id": chat_id, "text": "Comando non riconosciuto!"}
-
-
-async def show_plan_info(chat_id, plan):
+# -----------------------------
+# INFO PIANO
+# -----------------------------
+def show_plan_info(update, context, plan):
     if plan == "free":
-        text = "🆓 **Free Plan:** puoi creare fino a 5 partite per schedina. Scegli il tuo campionato preferito e divertiti!"
-        keyboard = [
-            [{"text": "Scegli Campionato ⚽", "callback_data": "select_league_free"}],
-            [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
-        ]
+        text = "🆓 **Free Plan:** puoi creare fino a 5 partite per schedina."
+    elif plan == "2eur":
+        text = "💶 **2€ Pack:** più partite disponibili, accesso a funzionalità extra!"
     else:
-        # Link di esempio Stripe
-        text = f"💳 **{plan.upper()} Plan:** clicca per procedere al pagamento!"
-        link = "https://buy.stripe.com/test_link"  # sostituire con link reale
-        keyboard = [
-            [{"text": f"Procedi a pagamento {plan.upper()}", "url": link}],
-            [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
-        ]
-    reply_markup = {"inline_keyboard": keyboard}
-    return {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
+        text = "👑 **VIP:** massimo 20 partite per schedina, aggiornamenti e supporto VIP."
 
-
-async def show_leagues(chat_id, plan):
-    text = "Seleziona il campionato che vuoi per la tua schedina:"
-    keyboard = []
-    for league_id, league_name in LEAGUES.items():
-        keyboard.append([{"text": league_name, "callback_data": f"league_{league_id}"}])
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    reply_markup = {"inline_keyboard": keyboard}
-    return {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
-
-
-async def show_matches(chat_id, league_id):
-    text = f"Qui puoi scegliere le partite reali per {LEAGUES.get(league_id, league_id)} (esempio):"
-    # qui si possono inserire le partite reali
     keyboard = [
-        [{"text": "Partita 1", "callback_data": "match_1"}],
-        [{"text": "Partita 2", "callback_data": "match_2"}],
-        [{"text": "🔙 Indietro", "callback_data": "select_league_free"}]
+        [{"text": "Scegli campionato ⚽", "callback_data": f"select_league_{plan}"}],
+        [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
     ]
-    reply_markup = {"inline_keyboard": keyboard}
-    return {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
+    return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
+# -----------------------------
+# SELEZIONA CAMPIONATO
+# -----------------------------
+def show_leagues(update, context, plan):
+    leagues = get_leagues()
+    keyboard = [
+        [{"text": l["league"]["name"], "callback_data": f"league_{l['league']['id']}_{plan}"}] 
+        for l in leagues[:20]
+    ]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
+    return {"text": "Seleziona un campionato:", "reply_markup": {"inline_keyboard": keyboard}}
 
-async def show_my_tickets(chat_id):
-    text = "📋 Le tue schedine salvate (esempio):\n- Schedina 1\n- Schedina 2"
-    keyboard = [[{"text": "🔙 Indietro", "callback_data": "main_menu"}]]
-    reply_markup = {"inline_keyboard": keyboard}
-    return {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
+# -----------------------------
+# MOSTRA PARTITE DEL CAMPIONATO
+# -----------------------------
+def show_matches(update, context, league_id, plan):
+    matches = get_matches(league_id)
+    keyboard = [
+        [{"text": f"{m['fixture']['home']['name']} vs {m['fixture']['away']['name']}", 
+          "callback_data": f"match_{m['fixture']['id']}"}] 
+        for m in matches[:20]
+    ]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}])
+    return {"text": "Seleziona le partite per la schedina:", "reply_markup": {"inline_keyboard": keyboard}}
+
+# -----------------------------
+# CREA SCHEDINA
+# -----------------------------
+def create_ticket(user_id, match_ids):
+    plan = get_user_plan(user_id)
+    if plan == "free" and len(match_ids) > 5:
+        match_ids = match_ids[:5]
+    add_ticket(user_id, match_ids)
+    return {"text": f"Schedina creata con {len(match_ids)} partite!"}
