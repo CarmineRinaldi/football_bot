@@ -1,36 +1,43 @@
+import os
 from fastapi import FastAPI, Request
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import Update, Bot
+from telegram.ext import Application, CommandHandler, ContextTypes, Dispatcher
 
-# Crea l'app FastAPI
+# --- Config ---
+TOKEN = os.environ.get("TELEGRAM_TOKEN")  # metti il token nelle variabili d'ambiente di Render
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
+WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}{WEBHOOK_PATH}"
+
 app = FastAPI()
 
-# Crea il bot Telegram
-BOT_TOKEN = "YOUR_TOKEN_HERE"
-bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
+# Crea il bot
+bot = Bot(token=TOKEN)
+application = Application.builder().token(TOKEN).build()
+dispatcher: Dispatcher = application.bot_data.setdefault("dispatcher", application.dispatcher)
 
-# Funzione comando /start
+# --- Handler esempio ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Ciao! Sono attivo!")
+    await update.message.reply_text("Ciao! Sono online 🚀")
 
-bot_app.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("start", start))
 
-# Endpoint webhook
-@app.post("/webhook")
-async def telegram_webhook(req: Request):
-    data = await req.json()
-    update = Update.de_json(data, bot_app.bot)
-    await bot_app.update_queue.put(update)
+# --- FastAPI webhook endpoint ---
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, bot)
+    await dispatcher.process_update(update)
     return {"ok": True}
 
-# Imposta webhook all'avvio
+# --- Startup & Shutdown ---
 @app.on_event("startup")
-async def on_startup():
-    webhook_url = "https://football-bot-ric2.onrender.com/webhook"
-    await bot_app.bot.set_webhook(webhook_url)
-    print(f"Webhook impostato su {webhook_url}")
+async def startup_event():
+    # Imposta il webhook su Telegram
+    await bot.delete_webhook()
+    await bot.set_webhook(WEBHOOK_URL)
+    print(f"Webhook impostato su {WEBHOOK_URL}")
 
-# Opzionale: endpoint di test
-@app.get("/")
-def read_root():
-    return {"status": "ok"}
+@app.on_event("shutdown")
+async def shutdown_event():
+    await bot.delete_webhook()
+    print("Webhook eliminato al shutdown")
