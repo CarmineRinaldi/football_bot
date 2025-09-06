@@ -1,7 +1,6 @@
-fastapi
-uvicorn
-gunicorn
-stripe
-requests
+fastapi==0.111.0
+uvicorn==0.25.0
+gunicorn==21.2.0
+stripe==11.14.0
+requests==2.32.0
 python-telegram-bot==20.3
-aiohttp
