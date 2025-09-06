@@ -18,11 +18,11 @@ def show_main_menu(update, context):
 
 def show_plan_info(update, context, plan):
     if plan == "free":
-        text = "🆓 **Free Plan:** puoi creare fino a 5 partite per schedina."
+        text = "🆓 **Free Plan:** fino a 5 partite per schedina."
     elif plan == "2eur":
-        text = "💶 **2€ Pack:** più partite disponibili, accesso a funzionalità extra!"
+        text = "💶 **2€ Pack:** più partite disponibili, funzionalità extra!"
     else:
-        text = "👑 **VIP:** massimo 20 partite per schedina, aggiornamenti e supporto VIP."
+        text = "👑 **VIP:** massimo 20 partite, aggiornamenti e supporto VIP."
 
     keyboard = [
         [{"text": "Scegli campionato ⚽", "callback_data": f"select_league_{plan}"}],
@@ -31,42 +31,41 @@ def show_plan_info(update, context, plan):
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_leagues(update, context, plan):
-    leagues = get_leagues()
-    # aggiungi le nazionali manualmente
-    national_teams = [
-        {"league": {"id": 1001, "name": "Italia"}}, 
-        {"league": {"id": 1002, "name": "Inghilterra"}},
-        {"league": {"id": 1003, "name": "Germania"}}
-    ]
-    leagues = leagues[:20] + national_teams
-
-    keyboard = [[{"text": l["league"]["name"], "callback_data": f"league_{l['league']['id']}_{plan}"}] for l in leagues]
+    leagues = get_leagues()  # Lista campionati nazionali + nazionali
+    keyboard = [[{"text": l["name"], "callback_data": f"league_{l['id']}_{plan}"}] for l in leagues[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    return {"text": "Seleziona un campionato:", "reply_markup": {"inline_keyboard": keyboard}}
+    return {"text": "Seleziona un campionato o una nazionale:", "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_matches(update, context, league_id, plan):
     matches = get_matches(league_id)
-    keyboard = [[{"text": f"{m['fixture']['home']['name']} vs {m['fixture']['away']['name']}", 
-                  "callback_data": f"match_{m['fixture']['id']}_{plan}"}] for m in matches[:20]]
+    keyboard = []
+    for m in matches[:20]:
+        keyboard.append([
+            {"text": "1", "callback_data": f"predict_{m['fixture']['id']}_home"},
+            {"text": "X", "callback_data": f"predict_{m['fixture']['id']}_draw"},
+            {"text": "2", "callback_data": f"predict_{m['fixture']['id']}_away"}
+        ])
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}])
-    return {"text": "Seleziona le partite per la schedina:", "reply_markup": {"inline_keyboard": keyboard}}
-
-def show_match_options(update, context, match_id, plan):
-    # Mostra pulsanti 1 / X / 2 per la partita selezionata
-    keyboard = [
-        [{"text": "1️⃣ Casa", "callback_data": f"predict_{match_id}_1_{plan}"}],
-        [{"text": "❌ Pareggio", "callback_data": f"predict_{match_id}_X_{plan}"}],
-        [{"text": "2️⃣ Ospite", "callback_data": f"predict_{match_id}_2_{plan}"}],
-        [{"text": "🔙 Indietro", "callback_data": f"league_back_{plan}"}]
-    ]
-    return {"text": "Scegli il pronostico per questa partita:", "reply_markup": {"inline_keyboard": keyboard}}
+    keyboard.append([{"text": "✅ Conferma schedina", "callback_data": f"confirm_ticket_{plan}"}])
+    return {"text": "Seleziona i pronostici per le partite:", "reply_markup": {"inline_keyboard": keyboard}}
 
 def save_prediction(user_id, match_id, prediction):
     add_match_prediction(user_id, match_id, prediction)
     return {"text": f"Pronostico salvato: {prediction}"}
 
 def create_ticket(user_id, match_ids):
-    if len(match_ids) > 5 and get_user_plan(user_id) == "free":
+    plan = get_user_plan(user_id)
+    if len(match_ids) > 5 and plan == "free":
         match_ids = match_ids[:5]
     add_ticket(user_id, match_ids)
     return {"text": f"Schedina creata con {len(match_ids)} partite!"}
+
+def show_user_tickets(update, context):
+    user_id = update["message"]["from"]["id"]
+    tickets = get_user_tickets(user_id)
+    if not tickets:
+        return {"text": "Non hai ancora schedine create."}
+    text = "Le tue schedine:\n\n"
+    for idx, t in enumerate(tickets, start=1):
+        text += f"{idx}. Partite: {t['match_ids']}\n"
+    return {"text": text}
