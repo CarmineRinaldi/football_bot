@@ -4,7 +4,7 @@ import logging
 import httpx
 from fastapi import FastAPI, Request
 from db import init_db, delete_old_tickets
-from bot_logic import start, show_main_menu, show_leagues, show_matches
+from bot_logic import start, show_main_menu, show_plan_info, show_leagues, show_matches
 from stripe_webhook import handle_stripe_event
 
 # -----------------------------
@@ -32,7 +32,6 @@ BASE_URL = f"https://api.telegram.org/bot{TG_BOT_TOKEN}"
 # Helper
 # -----------------------------
 def get_user_id(update):
-    """Estrae correttamente l'user_id da message o callback_query"""
     if "message" in update:
         return update["message"]["from"]["id"]
     elif "callback_query" in update:
@@ -40,7 +39,6 @@ def get_user_id(update):
     return None
 
 async def send_message(chat_id: int, text: str, reply_markup: dict = None):
-    """Invia un messaggio Telegram in modo asincrono"""
     payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
@@ -48,7 +46,6 @@ async def send_message(chat_id: int, text: str, reply_markup: dict = None):
         await client.post(f"{BASE_URL}/sendMessage", json=payload)
 
 async def edit_message(chat_id: int, message_id: int, text: str, reply_markup: dict = None):
-    """Modifica un messaggio esistente Telegram (inline buttons)"""
     payload = {"chat_id": chat_id, "message_id": message_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
@@ -69,9 +66,7 @@ async def telegram_webhook(req: Request):
 
     user_id = get_user_id(data)
 
-    # -----------------
     # Messaggi testuali
-    # -----------------
     if "message" in data and "text" in data["message"]:
         text = data["message"]["text"]
         chat_id = data["message"]["chat"]["id"]
@@ -80,29 +75,36 @@ async def telegram_webhook(req: Request):
             response = start(data, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
 
-    # -----------------
     # Callback inline
-    # -----------------
     if "callback_query" in data:
         cb = data["callback_query"]
         chat_id = cb["message"]["chat"]["id"]
         message_id = cb["message"]["message_id"]
         cb_data = cb["data"]
 
-        # Menu principale / piani
-        if cb_data.startswith("plan_"):
+        # Torna al menu principale
+        if cb_data == "main_menu":
             response = show_main_menu(data, None)
+            await edit_message(chat_id, message_id, response["text"], response.get("reply_markup"))
+
+        # Piani
+        elif cb_data in ["plan_free", "plan_2eur", "plan_vip"]:
+            plan = cb_data.split("_")[1]
+            response = show_plan_info(data, None, plan)
             await edit_message(chat_id, message_id, response["text"], response.get("reply_markup"))
 
         # Selezione campionato
-        elif cb_data.startswith("league_"):
-            league_id = int(cb_data.split("_")[1])
-            response = show_matches(data, None, league_id)
+        elif cb_data.startswith("select_league_"):
+            plan = cb_data.split("_")[-1]
+            response = show_leagues(data, None, plan)
             await edit_message(chat_id, message_id, response["text"], response.get("reply_markup"))
 
-        # Torna al menu principale
-        elif cb_data == "main_menu":
-            response = show_main_menu(data, None)
+        # Scelta campionato
+        elif cb_data.startswith("league_"):
+            parts = cb_data.split("_")
+            league_id = int(parts[1])
+            plan = parts[2]
+            response = show_matches(data, None, league_id, plan)
             await edit_message(chat_id, message_id, response["text"], response.get("reply_markup"))
 
     return {"status": 200}
