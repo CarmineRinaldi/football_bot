@@ -52,7 +52,7 @@ def get_user_tickets(user_id):
     conn.close()
     return tickets
 
-def delete_old_tickets(days=10):
+def delete_old_tickets(days=1):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     cutoff = datetime.utcnow() - timedelta(days=days)
