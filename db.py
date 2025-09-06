@@ -4,34 +4,40 @@ from datetime import date
 conn = sqlite3.connect("bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# --- Tabelle esistenti ---
-cursor.execute("""CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    plan TEXT DEFAULT 'free'
-)""")
+def init_db():
+    # --- Tabelle utenti e plan ---
+    cursor.execute("""CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        plan TEXT DEFAULT 'free'
+    )""")
 
-cursor.execute("""CREATE TABLE IF NOT EXISTS tickets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    match_ids TEXT,
-    date_created TEXT
-)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        match_ids TEXT,
+        date_created TEXT
+    )""")
 
-cursor.execute("""CREATE TABLE IF NOT EXISTS predictions (
-    user_id INTEGER,
-    match_id INTEGER,
-    prediction TEXT,
-    date_created TEXT
-)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS predictions (
+        user_id INTEGER,
+        match_id INTEGER,
+        prediction TEXT,
+        date_created TEXT
+    )""")
 
-# --- Tabella limit giornaliero ---
-cursor.execute("""CREATE TABLE IF NOT EXISTS daily_limit (
-    user_id INTEGER PRIMARY KEY,
-    date TEXT,
-    count INTEGER
-)""")
-conn.commit()
+    cursor.execute("""CREATE TABLE IF NOT EXISTS daily_limit (
+        user_id INTEGER PRIMARY KEY,
+        date TEXT,
+        count INTEGER
+    )""")
+    conn.commit()
 
+def delete_old_tickets():
+    # cancella schedine più vecchie di 30 giorni
+    cursor.execute("DELETE FROM tickets WHERE date_created < date('now','-30 days')")
+    conn.commit()
+
+# --- Funzioni già definite ---
 def add_user(user_id):
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
