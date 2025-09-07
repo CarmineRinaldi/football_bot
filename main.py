@@ -29,11 +29,13 @@ user_search_mode = {}
 
 async def send_message(chat_id, text, reply_markup=None):
     async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/sendMessage", json={
+        res = await client.post(f"{BASE_URL}/sendMessage", json={
             "chat_id": chat_id,
             "text": text,
             "reply_markup": reply_markup
         })
+        data = res.json()
+        return data.get("result", {}).get("message_id")
 
 async def delete_message(chat_id, message_id):
     async with httpx.AsyncClient() as client:
@@ -41,6 +43,10 @@ async def delete_message(chat_id, message_id):
             "chat_id": chat_id,
             "message_id": message_id
         })
+
+async def send_loading(chat_id):
+    """Invia messaggio di attesa e ritorna il message_id"""
+    return await send_message(chat_id, "⏳ Caricamento...")
 
 # --------------------------
 # Webhook
@@ -89,58 +95,54 @@ async def telegram_webhook(req: Request):
         chat_id = cb["message"]["chat"]["id"]
         message_id = cb["message"]["message_id"]
         cb_data = cb["data"]
+
+        # 1. Cancella messaggio originale
         await delete_message(chat_id, message_id)
+
+        # 2. Invia messaggio di attesa
+        loading_msg_id = await send_loading(chat_id)
 
         # Menu principale
         if cb_data == "main_menu":
             response = show_main_menu(data, None)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
         elif cb_data in ["plan_free", "plan_2eur", "plan_vip"]:
             plan = cb_data.split("_")[1]
             response = show_plan_info(data, None, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # Selezione alfabetica
         elif cb_data.startswith("select_league_"):
             plan = cb_data.split("_")[-1]
             response = show_alphabet_keyboard(plan, "league")
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
         elif cb_data.startswith("select_national_"):
             plan = cb_data.split("_")[-1]
             response = show_alphabet_keyboard(plan, "national")
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # Filtri per lettera
         elif cb_data.startswith("filter_"):
             parts = cb_data.split("_")
             type_ = parts[1]
             letter = parts[2]
             plan = parts[3]
             response = show_filtered_options(type_, letter, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # Mostra partite da lega/nazionale
         elif cb_data.startswith("league_") or cb_data.startswith("national_"):
             parts = cb_data.split("_")
             league_id = int(parts[1])
             plan = parts[2]
             response = show_matches(data, None, league_id, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # Modalità ricerca squadra
         elif cb_data.startswith("search_team_"):
             plan = cb_data.split("_")[-1]
             user_search_mode[chat_id] = plan
             response = search_team_prompt(plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # Click su squadra dai risultati ricerca
         elif cb_data.startswith("team_"):
             parts = cb_data.split("_")
             match_id = int(parts[1])
             plan = parts[2]
             response = show_matches(data, None, match_id, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
+        else:
+            response = {"text": "⚠️ Funzione non riconosciuta.", "reply_markup": None}
+
+        # 3. Invia risposta reale
+        await send_message(chat_id, response["text"], response.get("reply_markup"))
+
+        # 4. Cancella messaggio di attesa
+        if loading_msg_id:
+            await delete_message(chat_id, loading_msg_id)
 
     return {"status": 200}
 
