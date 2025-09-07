@@ -12,7 +12,7 @@ Scegli il tuo piano e preparati a segnare come CR7 🐐.
 - Pack 2€: 10 schedine
 - VIP: accesso completo a tutti i pronostici
 
-Usa i pulsanti qui sotto per iniziare!
+🏟️ Usa i pulsanti qui sotto per iniziare la partita!
 """
 
 async def cmd_start(message: types.Message):
