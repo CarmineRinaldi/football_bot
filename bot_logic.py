@@ -166,7 +166,7 @@ def handle_callback(callback_data, update, context):
         try:
             page = int(parts[2])
         except ValueError:
-            page = 0  # fallback sicuro
+            page = 0
         plan = parts[3]
         if prefix == "league":
             return show_leagues(update, context, plan, page)
@@ -184,12 +184,11 @@ def handle_callback(callback_data, update, context):
         try:
             league_id = int(parts[2])
         except ValueError:
-            league_id = 0  # fallback sicuro
+            league_id = 0
         plan = parts[3]
         return show_matches(update, context, league_id, plan)
 
     # Selezione partita
     if callback_data.startswith("match_"):
         match_id = callback_data.split("_")[1]
-        # Qui puoi aggiungere logica per salvare il match selezionato
         return {"text": f"✅ Hai selezionato la partita {match_id}!"}
