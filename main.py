@@ -29,13 +29,11 @@ user_search_mode = {}
 
 async def send_message(chat_id, text, reply_markup=None):
     async with httpx.AsyncClient() as client:
-        res = await client.post(f"{BASE_URL}/sendMessage", json={
+        await client.post(f"{BASE_URL}/sendMessage", json={
             "chat_id": chat_id,
             "text": text,
             "reply_markup": reply_markup
         })
-        data = res.json()
-        return data.get("result", {}).get("message_id")
 
 async def delete_message(chat_id, message_id):
     async with httpx.AsyncClient() as client:
@@ -44,9 +42,14 @@ async def delete_message(chat_id, message_id):
             "message_id": message_id
         })
 
-async def send_loading(chat_id):
-    """Invia messaggio di attesa e ritorna il message_id"""
-    return await send_message(chat_id, "⏳ Caricamento...")
+async def send_waiting_message(chat_id):
+    """Invia messaggio di attesa e restituisce l'ID del messaggio."""
+    async with httpx.AsyncClient() as client:
+        res = await client.post(f"{BASE_URL}/sendMessage", json={
+            "chat_id": chat_id,
+            "text": "⌛ Sto caricando i dati, attendi un attimo...",
+        })
+        return (await res.json())["result"]["message_id"]
 
 # --------------------------
 # Webhook
@@ -96,53 +99,63 @@ async def telegram_webhook(req: Request):
         message_id = cb["message"]["message_id"]
         cb_data = cb["data"]
 
-        # 1. Cancella messaggio originale
+        # eliminiamo il messaggio originale per pulizia
         await delete_message(chat_id, message_id)
 
-        # 2. Invia messaggio di attesa
-        loading_msg_id = await send_loading(chat_id)
+        # INVIO messaggio di attesa
+        waiting_msg_id = await send_waiting_message(chat_id)
 
+        # --------------------------
         # Menu principale
         if cb_data == "main_menu":
             response = show_main_menu(data, None)
         elif cb_data in ["plan_free", "plan_2eur", "plan_vip"]:
             plan = cb_data.split("_")[1]
             response = show_plan_info(data, None, plan)
+        
+        # --------------------------
+        # Selezione alfabetica
         elif cb_data.startswith("select_league_"):
             plan = cb_data.split("_")[-1]
             response = show_alphabet_keyboard(plan, "league")
         elif cb_data.startswith("select_national_"):
             plan = cb_data.split("_")[-1]
             response = show_alphabet_keyboard(plan, "national")
+        
+        # Filtri per lettera
         elif cb_data.startswith("filter_"):
             parts = cb_data.split("_")
             type_ = parts[1]
             letter = parts[2]
             plan = parts[3]
             response = show_filtered_options(type_, letter, plan)
+
+        # Mostra partite da lega/nazionale
         elif cb_data.startswith("league_") or cb_data.startswith("national_"):
             parts = cb_data.split("_")
             league_id = int(parts[1])
             plan = parts[2]
             response = show_matches(data, None, league_id, plan)
+
+        # Modalità ricerca squadra
         elif cb_data.startswith("search_team_"):
             plan = cb_data.split("_")[-1]
             user_search_mode[chat_id] = plan
             response = search_team_prompt(plan)
+
+        # Click su squadra dai risultati ricerca
         elif cb_data.startswith("team_"):
             parts = cb_data.split("_")
             match_id = int(parts[1])
             plan = parts[2]
             response = show_matches(data, None, match_id, plan)
-        else:
-            response = {"text": "⚠️ Funzione non riconosciuta.", "reply_markup": None}
 
-        # 3. Invia risposta reale
+        # --------------------------
+        # Elimina messaggio di attesa
+        await delete_message(chat_id, waiting_msg_id)
+
+        # INVIO messaggio finale
         await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-        # 4. Cancella messaggio di attesa
-        if loading_msg_id:
-            await delete_message(chat_id, loading_msg_id)
 
     return {"status": 200}
 
