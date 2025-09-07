@@ -1,7 +1,6 @@
 import os
 import logging
-import asyncio
-from aiogram import Dispatcher, types, F
+from aiogram import Dispatcher, types
 from aiogram.client.bot import Bot, DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
@@ -16,8 +15,8 @@ BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("Devi impostare la variabile TG_BOT_TOKEN!")
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # es: https://football-bot-ric2.onrender.com/webhook
-PORT = int(os.getenv("PORT", 8080))     # Render usa la variabile PORT
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # es: https://tuo-bot.onrender.com/webhook
+PORT = int(os.getenv("PORT", 8080))     # Render usa PORT in automatico
 
 # --- CREA BOT E DISPATCHER ---
 bot = Bot(
@@ -26,10 +25,14 @@ bot = Bot(
 )
 dp = Dispatcher()
 
-# --- HANDLER ---
+# --- HANDLER BASE ---
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
     await message.answer("⚽ FootballBot è online con webhook!")
+
+# --- IMPORTA HANDLER PERSONALIZZATI ---
+from handlers import plans
+plans.register_handlers(dp)
 
 # --- APP AIOHTTP ---
 async def on_startup(app: web.Application):
