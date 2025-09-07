@@ -3,61 +3,62 @@ import logging
 import asyncio
 from aiogram import types
 from aiogram.client.bot import Bot, DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.filters.callback_data import CallbackData
 from aiogram import Dispatcher
+from aiohttp import web
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- VARIABILI DALL'ENVIRONMENT ---
+# --- VARIABILI AMBIENTE ---
 BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-if not BOT_TOKEN:
-    raise ValueError("Devi impostare la variabile TG_BOT_TOKEN!")
-
-ADMIN_HTTP_TOKEN = os.getenv("ADMIN_HTTP_TOKEN")
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
-DATABASE_URL = os.getenv("DATABASE_URL", "users.db")
-FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
-VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_ENDPOINT_SECRET = os.getenv("STRIPE_ENDPOINT_SECRET")
-STRIPE_PRICE_2EUR = os.getenv("STRIPE_PRICE_2EUR")
-STRIPE_PRICE_VIP = os.getenv("STRIPE_PRICE_VIP")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# --- CALLBACK DATA ---
-class ExampleCB(CallbackData, prefix="example"):
-    action: str
-    id: str
+if not BOT_TOKEN or not WEBHOOK_URL:
+    raise ValueError("Devi impostare TG_BOT_TOKEN e WEBHOOK_URL nell'environment!")
 
-# --- BOT ---
+# --- BOT & DISPATCHER ---
 bot = Bot(
     token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode="HTML")  # parse_mode corretto
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
-
-# --- DISPATCHER ---
 dp = Dispatcher()
 
-# --- HANDLER DI ESEMPIO ---
+# --- HANDLER BASE ---
+@dp.message(Command("start"))
 async def start_handler(message: types.Message):
-    await message.answer("⚽ FootballBot è online! Pronti a fare pronostici vincenti!")
+    await message.answer("⚽ Benvenuto su FootballBot!\nPronti a fare pronostici vincenti?")
 
-# --- REGISTRA HANDLER ---
-dp.message.register(start_handler, Command("start"))
+# --- WEBHOOK HANDLER ---
+async def handle_webhook(request: web.Request):
+    try:
+        data = await request.json()
+        update = types.Update(**data)
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        logger.error(f"Errore nel gestire update: {e}")
+    return web.Response()
 
-# --- RUN BOT ---
-async def main():
-    # Se vuoi usare webhook su Render:
-    # await bot.set_webhook(WEBHOOK_URL)
-    logger.info("Bot avviato...")
-    await dp.start_polling(bot)
+# --- EVENTI APP ---
+async def on_startup(app: web.Application):
+    await bot.set_webhook(WEBHOOK_URL)
+    logger.info(f"Webhook impostato su {WEBHOOK_URL}")
+
+async def on_shutdown(app: web.Application):
+    await bot.delete_webhook()
+    logger.info("Webhook eliminato.")
+
+# --- MAIN ---
+def main():
+    app = web.Application()
+    app.router.add_post("/", handle_webhook)  # Telegram invierà qui gli update
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
+    port = int(os.getenv("PORT", 10000))
+    web.run_app(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot fermato manualmente.")
-
+    main()
