@@ -7,11 +7,9 @@ BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY, "X-Auth-Token": API_KEY}
 
 # --------------------------
-# Funzioni interne
+# Fetch leghe raw
 # --------------------------
-
 def _fetch_leagues_raw():
-    """Recupera tutte le leghe dal servizio API Football."""
     try:
         res = requests.get(f"{BASE_URL}/leagues", headers=HEADERS, timeout=10)
         res.raise_for_status()
@@ -23,26 +21,25 @@ def _fetch_leagues_raw():
 # --------------------------
 # Leghe e nazionali
 # --------------------------
-
 def get_leagues():
-    """Restituisce solo leghe di club."""
     data = _fetch_leagues_raw()
     seen_ids = set()
+    seen_name_country = set()
     leagues = []
 
     for l in data:
         league = l.get("league", {})
-        lid = league.get("id")
-        typ = (league.get("type") or "").lower()
-        if typ != "league":
-            continue  # solo leghe di club
         country = l.get("country", {})
+        lid = league.get("id")
         name = league.get("name", "")
         country_name = country.get("name") or country.get("code") or ""
+        key_name_country = (name.strip().lower(), country_name.strip().lower())
 
-        if lid in seen_ids:
+        if lid in seen_ids or key_name_country in seen_name_country:
             continue
+
         seen_ids.add(lid)
+        seen_name_country.add(key_name_country)
         l["display_name"] = f"{name} ({country_name})" if country_name else name
         leagues.append(l)
 
@@ -50,24 +47,25 @@ def get_leagues():
     return leagues
 
 def get_national_teams():
-    """Restituisce competizioni nazionali/cup."""
     data = _fetch_leagues_raw()
     seen_ids = set()
+    seen_name_country = set()
     national_leagues = []
 
     for l in data:
         league = l.get("league", {})
-        typ = (league.get("type") or "").lower()
-        if typ not in ["cup", "national"]:
-            continue
-        lid = league.get("id")
         country = l.get("country", {})
+        lid = league.get("id")
         name = league.get("name", "")
+        typ = (league.get("type") or "").lower()
         country_name = country.get("name") or country.get("code") or ""
+        key_name_country = (name.strip().lower(), country_name.strip().lower())
 
-        if lid in seen_ids:
+        if lid in seen_ids or key_name_country in seen_name_country:
             continue
+
         seen_ids.add(lid)
+        seen_name_country.add(key_name_country)
         l["display_name"] = f"{name} ({country_name})" if country_name else name
         national_leagues.append(l)
 
@@ -75,11 +73,9 @@ def get_national_teams():
     return national_leagues
 
 # --------------------------
-# Fixtures / partite
+# Partite
 # --------------------------
-
 def get_matches(league_id):
-    """Recupera le partite di una lega, con fallback stagioni."""
     try:
         url = f"{BASE_URL}/fixtures?league={league_id}"
         res = requests.get(url, headers=HEADERS, timeout=10)
@@ -96,30 +92,42 @@ def get_matches(league_id):
             data = res.json().get("response", [])
             if data:
                 return data
-
         return []
     except Exception as e:
         print(f"Errore get_matches per lega {league_id}: {e}")
         return []
 
 # --------------------------
-# Ricerca squadre
+# Ricerca squadra
 # --------------------------
-
 def search_teams(query):
     """
-    Restituisce tutte le squadre che contengono la stringa `query`
-    in tutte le leghe di club e nazionali.
+    Cerca squadre in tutte le leghe e nazionali che contengono la stringa 'query'.
+    Ritorna lista di dict: {"team": <nome squadra>, "match_id": <id lega>}
     """
+    query = query.lower()
     results = []
-    leagues = get_leagues() + get_national_teams()
-    for l in leagues:
-        matches = get_matches(l["league"]["id"])
+
+    for league in get_leagues() + get_national_teams():
+        league_id = league["league"]["id"]
+        matches = get_matches(league_id)
         for m in matches:
             home = m["teams"]["home"]["name"]
             away = m["teams"]["away"]["name"]
-            if query.lower() in home.lower():
-                results.append({"team": home, "match_id": m["fixture"]["id"], "league_id": l["league"]["id"]})
-            if query.lower() in away.lower():
-                results.append({"team": away, "match_id": m["fixture"]["id"], "league_id": l["league"]["id"]})
-    return results
+            fixture_id = m["fixture"]["id"]
+
+            if query in home.lower():
+                results.append({"team": home, "match_id": fixture_id})
+            if query in away.lower():
+                results.append({"team": away, "match_id": fixture_id})
+
+    # Rimuove duplicati basati su team + match_id
+    seen = set()
+    unique_results = []
+    for r in results:
+        key = (r["team"], r["match_id"])
+        if key not in seen:
+            seen.add(key)
+            unique_results.append(r)
+
+    return unique_results
