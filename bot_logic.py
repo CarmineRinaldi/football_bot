@@ -1,6 +1,10 @@
 from db import add_user, get_user_plan, add_ticket, get_user_tickets
 from football_api import get_leagues, get_national_teams, get_matches
 from datetime import datetime
+import os
+
+FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
+VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
 
 # --------------------------
 # Funzioni menu principale
@@ -23,11 +27,11 @@ def show_main_menu(update, context):
 
 def show_plan_info(update, context, plan):
     if plan == "free":
-        text = "🆓 **Free Plan:** puoi fare fino a 5 pronostici al giorno, massimo 5 partite per pronostico!"
+        text = f"🆓 **Free Plan:** puoi fare fino a {FREE_MAX_MATCHES} pronostici al giorno, massimo 5 partite per pronostico!"
     elif plan == "2eur":
         text = "💶 **2€ Pack:** più pronostici giornalieri e funzionalità extra!"
     else:
-        text = "👑 **VIP:** massimo 5 pronostici al giorno, aggiornamenti e supporto VIP!"
+        text = f"👑 **VIP:** massimo {VIP_MAX_MATCHES} pronostici al giorno, aggiornamenti e supporto VIP!"
 
     keyboard = [
         [{"text": "Scegli campionato ⚽", "callback_data": f"select_league_{plan}"}],
@@ -37,55 +41,41 @@ def show_plan_info(update, context, plan):
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
-# Funzioni campionati
+# Funzioni campionati / ricerca alfabetica
 # --------------------------
 
-def show_leagues(update, context, plan):
-    leagues = get_leagues()
-
-    if not leagues:
-        return {
-            "text": "😕 Al momento non ci sono campionati disponibili.\n"
-                    "Forse le squadre stanno facendo il riscaldamento... riprova più tardi!",
-            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}
-        }
-
-    keyboard = [[{"text": l["display_name"], "callback_data": f"league_{l['league']['id']}_{plan}"}] for l in leagues[:20]]
+def show_alphabet_keyboard(plan, type_):
+    keyboard = [[{"text": c, "callback_data": f"filter_{type_}_{c}_{plan}"}] for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    return {
-        "text": "🏟️ Seleziona un campionato e costruisci il tuo pronostico (max 5 partite):", 
-        "reply_markup": {"inline_keyboard": keyboard}
-    }
+    return {"text": "🔍 Seleziona la lettera iniziale del campionato:", "reply_markup": {"inline_keyboard": keyboard}}
 
-def show_nationals(update, context, plan):
-    leagues = get_national_teams()
+def show_filtered_options(type_, letter, plan):
+    options = get_leagues() if type_ == "league" else get_national_teams()
+    filtered = [o for o in options if o["league"]["name"].upper().startswith(letter.upper())]
 
-    if not leagues:
-        return {
-            "text": "🌍 Nessuna nazionale in campo al momento!\n"
-                    "Le squadre staranno cantando l'inno... riprova più tardi!",
-            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}
-        }
+    if not filtered:
+        return {"text": f"😕 Nessun {type_} trovato con la lettera '{letter}'.",
+                "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}}
 
-    keyboard = [[{"text": l["display_name"], "callback_data": f"national_{l['league']['id']}_{plan}"}] for l in leagues[:20]]
+    keyboard = [[{"text": o["display_name"], "callback_data": f"{type_}_{o['league']['id']}_{plan}"}] for o in filtered]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    return {
-        "text": "🌍 Seleziona una nazionale e crea il tuo pronostico (max 5 partite):",
-        "reply_markup": {"inline_keyboard": keyboard}
-    }
+    return {"text": f"🏟️ Seleziona un {type_}:", "reply_markup": {"inline_keyboard": keyboard}}
+
+# --------------------------
+# Funzioni partite
+# --------------------------
 
 def show_matches(update, context, league_id, plan):
     matches = get_matches(league_id)
 
     if not matches:
         return {
-            "text": "⚽ Nessuna partita disponibile per questa competizione!\n"
-                    "I giocatori forse sono negli spogliatoi... riprova più tardi!",
+            "text": "⚽ Nessuna partita disponibile per questa competizione!",
             "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}]]}
         }
 
     keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}", 
-                  "callback_data": f"match_{m['fixture']['id']}"}] for m in matches[:20]]
+                  "callback_data": f"match_{m['fixture']['id']}"}] for m in matches]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}])
     return {
         "text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
@@ -96,18 +86,19 @@ def show_matches(update, context, league_id, plan):
 # Funzioni pronostici
 # --------------------------
 
-def can_create_pronostic(user_id, max_per_day=5):
+def can_create_pronostic(user_id, plan):
     tickets = get_user_tickets(user_id)
+    max_per_day = FREE_MAX_MATCHES if plan == "free" else VIP_MAX_MATCHES
     today = datetime.utcnow().date()
     today_tickets = [t for t in tickets if datetime.fromisoformat(t[2]).date() == today]
     return len(today_tickets) < max_per_day
 
-def create_ticket(user_id, match_ids):
+def create_ticket(user_id, match_ids, plan):
     if len(match_ids) > 5:
         match_ids = match_ids[:5]
 
-    if not can_create_pronostic(user_id):
-        return {"text": "⚠️ Hai già creato 5 pronostici oggi!\nRiprova domani per nuove emozioni calcistiche ⚽🎯"}
+    if not can_create_pronostic(user_id, plan):
+        return {"text": f"⚠️ Hai già creato {FREE_MAX_MATCHES if plan=='free' else VIP_MAX_MATCHES} pronostici oggi!"}
 
     add_ticket(user_id, match_ids)
     total_today = len([t for t in get_user_tickets(user_id) if datetime.fromisoformat(t[2]).date() == datetime.utcnow().date()])
