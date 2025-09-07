@@ -1,8 +1,14 @@
 from fastapi import FastAPI, Request
 from bot_logic import start, show_main_menu
+from db import init_db  # ✅ import DB init
 import uvicorn
 
 app = FastAPI()
+
+# --------------------------
+# Inizializza DB all'avvio
+# --------------------------
+init_db()
 
 # --------------------------
 # Webhook Handler
