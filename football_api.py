@@ -109,7 +109,7 @@ def get_matches(league_id):
         return []
 
 # --------------------------
-# Ricerca squadre con cache
+# Ricerca squadre
 # --------------------------
 def search_teams(query, type_=None):
     query = query.lower()
@@ -131,6 +131,7 @@ def search_teams(query, type_=None):
             if query in away.lower():
                 results.append({"team": away, "match_id": fixture_id})
 
+    # rimuove duplicati
     seen = set()
     unique_results = []
     for r in results:
