@@ -1,96 +1,73 @@
 import os
-import logging
 import asyncio
-import aiohttp
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.fsm.storage.memory import MemoryStorage
-import stripe
+from aiogram.types import Message
+from aiogram.client.session.aiohttp import AiohttpSession
 
-# -------------------------------
-# Configurazioni e variabili
-# -------------------------------
-logging.basicConfig(level=logging.INFO)
-
-BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
-VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
+# ==========================
+# CONFIGURAZIONE
+# ==========================
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # deve essere impostato su Render
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # es: "https://nome-app.onrender.com"
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 if not BOT_TOKEN:
     raise ValueError("Devi impostare la variabile BOT_TOKEN!")
-if not WEBHOOK_URL:
-    raise ValueError("Devi impostare la variabile WEBHOOK_URL!")
 
-# -------------------------------
-# Inizializza bot e dispatcher
-# -------------------------------
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(storage=MemoryStorage())
+# ==========================
+# BOT E DISPATCHER
+# ==========================
+bot = Bot(
+    token=BOT_TOKEN,
+    default=types.DefaultBotProperties(parse_mode=ParseMode.HTML),
+    session=AiohttpSession()
+)
+dp = Dispatcher()
 
-# -------------------------------
-# Configura Stripe
-# -------------------------------
-stripe.api_key = STRIPE_SECRET_KEY
-
-# -------------------------------
-# Funzioni helper
-# -------------------------------
-async def fetch_football_data(endpoint: str):
-    """Richiesta dati API football"""
-    url = f"https://api-football-v1.p.rapidapi.com/v3/{endpoint}"
-    headers = {"X-RapidAPI-Key": API_FOOTBALL_KEY}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            return await resp.json()
-
-# -------------------------------
-# Handlers
-# -------------------------------
+# ==========================
+# HANDLER
+# ==========================
 @dp.message(Command(commands=["start"]))
-async def cmd_start(message: types.Message):
-    await message.answer(
-        f"Ciao <b>{message.from_user.full_name}</b>! ⚽\n"
-        "Benvenuto nel bot di Football!\n"
-        "Usa /matches per vedere le partite disponibili."
-    )
+async def start_handler(message: Message):
+    await message.answer(f"Ciao {message.from_user.full_name}! Bot attivo con webhook ✅")
 
-@dp.message(Command(commands=["matches"]))
-async def cmd_matches(message: types.Message):
-    data = await fetch_football_data("fixtures?status=NS&league=39&season=2025")
-    if "response" not in data or not data["response"]:
-        await message.answer("Nessuna partita trovata al momento.")
-        return
-
-    text = "Ecco le prossime partite:\n\n"
-    for match in data["response"][:FREE_MAX_MATCHES]:
-        fixture = match["fixture"]
-        teams = match["teams"]
-        text += f"{teams['home']['name']} vs {teams['away']['name']} - {fixture['date'][:10]}\n"
-
-    await message.answer(text)
-
-@dp.message()
-async def echo(message: types.Message):
-    await message.answer(f"Hai scritto: {message.text}")
-
-# -------------------------------
-# Webhook setup
-# -------------------------------
-async def setup_webhook():
+# ==========================
+# FUNZIONI WEBHOOK
+# ==========================
+async def on_startup():
+    # Rimuove vecchi webhook e imposta quello nuovo
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(WEBHOOK_URL)
-    logging.info(f"Webhook impostato su {WEBHOOK_URL}")
+    print("Webhook impostato:", WEBHOOK_URL)
 
-# -------------------------------
-# Main
-# -------------------------------
-async def main():
-    await setup_webhook()
-    logging.info("⚽ FootballBot è online! Pronti a fare pronostici vincenti!")
+async def on_shutdown():
+    # Pulizia
+    await bot.delete_webhook()
+    await bot.session.close()
+    print("Bot spento e webhook rimosso")
 
+# ==========================
+# SERVER WEB
+# ==========================
+async def handle(request):
+    # Riceve aggiornamenti da Telegram
+    update = types.Update(**await request.json())
+    await dp.process_update(update)
+    return web.Response()
+
+app = web.Application()
+app.router.add_post(WEBHOOK_PATH, handle)
+
+# ==========================
+# AVVIO BOT
+# ==========================
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(on_startup())
+    port = int(os.getenv("PORT", 8000))
+    print(f"Bot avviato su porta {port}")
+    web.run_app(app, port=port)
