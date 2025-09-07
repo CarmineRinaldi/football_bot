@@ -112,10 +112,6 @@ def get_matches(league_id):
 # Ricerca squadre con cache
 # --------------------------
 def search_teams(query, type_=None):
-    """
-    Cerca squadre in tutte le leghe e nazionali usando la cache.
-    type_ può essere 'league', 'national' o None
-    """
     query = query.lower()
     results = []
 
@@ -135,7 +131,6 @@ def search_teams(query, type_=None):
             if query in away.lower():
                 results.append({"team": away, "match_id": fixture_id})
 
-    # Rimuove duplicati
     seen = set()
     unique_results = []
     for r in results:
@@ -147,7 +142,7 @@ def search_teams(query, type_=None):
     return unique_results
 
 # --------------------------
-# Funzione helper per filtro per lettera
+# Filtro per lettera
 # --------------------------
 def filter_by_letter(items, key_name, letter):
     letter = letter.lower()
