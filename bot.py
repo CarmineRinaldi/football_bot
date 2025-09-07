@@ -2,7 +2,8 @@ import os
 import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.enums import ParseMode  # <-- import corretto per v3
+from aiogram.client.bot import DefaultBotProperties  # <-- import per le proprietà predefinite
+from aiogram.enums import ParseMode
 from handlers import start, plans, search
 from utils.db import init_db
 
@@ -11,7 +12,10 @@ init_db()
 
 BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)  # <-- usa ParseMode da aiogram.enums
+# Impostazione delle proprietà predefinite del bot
+default_properties = DefaultBotProperties(parse_mode=ParseMode.HTML)
+
+bot = Bot(token=BOT_TOKEN, default=default_properties)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
