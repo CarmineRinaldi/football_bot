@@ -36,20 +36,24 @@ def show_plan_info(update, context, plan):
     keyboard = [
         [{"text": "Scegli campionato ⚽", "callback_data": f"select_league_{plan}"}],
         [{"text": "Nazionali 🌍", "callback_data": f"select_national_{plan}"}],
+        [{"text": "Cerca squadra 🔎", "callback_data": f"search_team_{plan}"}],  # Nuovo tasto
         [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
     ]
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
-# Funzioni campionati / ricerca alfabetica
+# Tastiere alfabetiche e filtraggio
 # --------------------------
 
 def show_alphabet_keyboard(plan, type_):
+    """Mostra tastiera A-Z per filtrare campionati o nazionali."""
     keyboard = [[{"text": c, "callback_data": f"filter_{type_}_{c}_{plan}"}] for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    return {"text": "🔍 Seleziona la lettera iniziale del campionato:", "reply_markup": {"inline_keyboard": keyboard}}
+    tipo_testo = "campionato" if type_ == "league" else "nazionale"
+    return {"text": f"🔍 Seleziona la lettera iniziale del {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_filtered_options(type_, letter, plan):
+    """Filtra campionati o nazionali in base alla lettera selezionata."""
     options = get_leagues() if type_ == "league" else get_national_teams()
     filtered = [o for o in options if o["league"]["name"].upper().startswith(letter.upper())]
 
@@ -59,7 +63,8 @@ def show_filtered_options(type_, letter, plan):
 
     keyboard = [[{"text": o["display_name"], "callback_data": f"{type_}_{o['league']['id']}_{plan}"}] for o in filtered]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    return {"text": f"🏟️ Seleziona un {type_}:", "reply_markup": {"inline_keyboard": keyboard}}
+    tipo_testo = "campionato" if type_ == "league" else "nazionale"
+    return {"text": f"🏟️ Seleziona un {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
 # Funzioni partite
