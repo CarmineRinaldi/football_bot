@@ -1,56 +1,34 @@
-import os
 import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiogram.client.bot import DefaultBotProperties
-from aiogram.fsm.storage.memory import MemoryStorage
-from handlers import start, plans, search
-from utils.db import init_db
+import os
+from aiogram import Bot, Dispatcher
+from aiogram.enums import ParseMode
+from handlers import start, search, plans  # Assicurati di avere __init__.py in handlers
+from aiogram.client.session.aiohttp import AiohttpSession
 
-# Inizializzazione database
-init_db()
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("TG_BOT_TOKEN non impostato nelle variabili d'ambiente")
+    raise ValueError("Devi impostare la variabile BOT_TOKEN!")
 
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=types.ParseMode.HTML)
-)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
+# Inizializza bot e dispatcher
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML, session=AiohttpSession())
+dp = Dispatcher()
 
-# Registrazione handlers
+# Registra gli handler
 start.register_handlers(dp)
-plans.register_handlers(dp)
 search.register_handlers(dp)
-
-# Handler per callback dei pulsanti
-from handlers.buttons import main_menu, back_home
-
-async def handle_callback(query: types.CallbackQuery):
-    data = query.data
-    if data == "back":
-        await query.message.edit_text("⬅️ Sei tornato indietro", reply_markup=back_home())
-    elif data == "home":
-        await query.message.edit_text("🏠 Torniamo alla Home", reply_markup=main_menu())
-    elif data == "plan_free":
-        from handlers.plans import plan_free
-        await plan_free(query.message, bot)
-    elif data == "plan_vip":
-        from handlers.plans import plan_vip
-        await plan_vip(query.message, bot)
-    elif data == "my_tickets":
-        from handlers.plans import my_tickets
-        await my_tickets(query.message)
-    else:
-        await query.answer("Comando non riconosciuto")
-
-dp.callback_query.register(handle_callback)
+plans.register_handlers(dp)
 
 async def main():
+    # Rimuove eventuale webhook attivo
+    await bot.delete_webhook(drop_pending_updates=True)
     print("⚽ FootballBot è online! Pronti a fare pronostici vincenti!")
-    await dp.start_polling(bot)
+
+    # Avvia il polling
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
