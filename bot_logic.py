@@ -20,6 +20,10 @@ def show_main_menu(update, context):
         [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
     ]
     message = "⚽ Benvenuto nel tuo stadio personale!\nScegli un piano o controlla le tue schedine:"
+    
+    # Salva l'id del messaggio per eventuale cancellazione
+    context["delete_previous_message"] = update["message"]["message_id"]
+    
     return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_plan_info(update, context, plan):
@@ -36,8 +40,11 @@ def show_plan_info(update, context, plan):
         [{"text": "🔍 Ricerca 🔎", "callback_data": f"search_{plan}"}],
         [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
     ]
+    
+    # Salva id del messaggio precedente
+    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
-
 
 # --------------------------
 # Funzioni campionati/nazionali paginati
@@ -69,6 +76,9 @@ def show_leagues(update, context, plan, page=0):
 
     page_items, total_pages = paginate_items(leagues, page)
     keyboard = create_league_keyboard(page_items, page, total_pages, plan, "league")
+    
+    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    
     return {"text": "🏟️ Seleziona un campionato (max 5 partite):", "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_nationals(update, context, plan, page=0):
@@ -78,8 +88,10 @@ def show_nationals(update, context, plan, page=0):
 
     page_items, total_pages = paginate_items(leagues, page)
     keyboard = create_league_keyboard(page_items, page, total_pages, plan, "national")
+    
+    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    
     return {"text": "🌍 Seleziona una nazionale (max 5 partite):", "reply_markup": {"inline_keyboard": keyboard}}
-
 
 # --------------------------
 # Funzione ricerca
@@ -94,8 +106,10 @@ def search_leagues(update, context, plan, query):
 
     keyboard = [[{"text": l["display_name"], "callback_data": f"search_result_{l['league']['id']}_{plan}"}] for l in results[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
+    
+    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    
     return {"text": f"🔎 Risultati per '{query}':", "reply_markup": {"inline_keyboard": keyboard}}
-
 
 # --------------------------
 # Funzioni partite
@@ -108,8 +122,10 @@ def show_matches(update, context, league_id, plan):
 
     keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}", "callback_data": f"match_{m['fixture']['id']}"}] for m in matches[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}])
+    
+    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    
     return {"text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:", "reply_markup": {"inline_keyboard": keyboard}}
-
 
 # --------------------------
 # Funzioni pronostici
@@ -131,7 +147,6 @@ def create_ticket(user_id, match_ids):
     add_ticket(user_id, match_ids)
     total_today = len([t for t in get_user_tickets(user_id) if datetime.fromisoformat(t[2]).date() == datetime.utcnow().date()])
     return {"text": f"✅ Pronostico creato con {len(match_ids)} partite!\nPronostico numero {total_today} di oggi."}
-
 
 # --------------------------
 # GESTORE CALLBACK COMPLETO
@@ -177,6 +192,7 @@ def handle_callback(callback_data, update, context):
     if callback_data.startswith("search_"):
         plan = callback_data.split("_")[1]
         context["awaiting_search"] = {"plan": plan}
+        context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
         return {"text": "🔍 Scrivi il nome della squadra o del campionato da cercare:"}
 
     # Risultati ricerca
@@ -193,7 +209,6 @@ def handle_callback(callback_data, update, context):
     if callback_data.startswith("match_"):
         match_id = callback_data.split("_")[1]
         return {"text": f"✅ Hai selezionato la partita {match_id}!"}
-
 
 # --------------------------
 # GESTIONE MESSAGGI TESTO (ricerca)
