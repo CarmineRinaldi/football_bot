@@ -1,10 +1,18 @@
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
 API_KEY = os.getenv("API_FOOTBALL_KEY")
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY, "X-Auth-Token": API_KEY}
+
+# --------------------------
+# Cache in memoria
+# --------------------------
+_leagues_cache = None
+_national_cache = None
+_matches_cache = {}  # {league_id: {"timestamp": ..., "matches": [...]}}
+CACHE_TTL = timedelta(minutes=5)  # cache valido 5 minuti
 
 # --------------------------
 # Fetch leghe raw
@@ -19,9 +27,14 @@ def _fetch_leagues_raw():
         return []
 
 # --------------------------
-# Leghe e nazionali
+# Leghe e nazionali con cache
 # --------------------------
 def get_leagues():
+    global _leagues_cache
+    now = datetime.utcnow()
+    if _leagues_cache and now - _leagues_cache["timestamp"] < CACHE_TTL:
+        return _leagues_cache["data"]
+
     data = _fetch_leagues_raw()
     seen_ids = set()
     seen_name_country = set()
@@ -44,9 +57,15 @@ def get_leagues():
         leagues.append(l)
 
     leagues.sort(key=lambda x: (x.get("country", {}).get("name") or "", x.get("league", {}).get("name") or ""))
+    _leagues_cache = {"timestamp": now, "data": leagues}
     return leagues
 
 def get_national_teams():
+    global _national_cache
+    now = datetime.utcnow()
+    if _national_cache and now - _national_cache["timestamp"] < CACHE_TTL:
+        return _national_cache["data"]
+
     data = _fetch_leagues_raw()
     seen_ids = set()
     seen_name_country = set()
@@ -70,18 +89,26 @@ def get_national_teams():
         national_leagues.append(l)
 
     national_leagues.sort(key=lambda x: (x.get("country", {}).get("name") or "", x.get("league", {}).get("name") or ""))
+    _national_cache = {"timestamp": now, "data": national_leagues}
     return national_leagues
 
 # --------------------------
-# Partite
+# Partite con cache
 # --------------------------
 def get_matches(league_id):
+    now = datetime.utcnow()
+    if league_id in _matches_cache:
+        cached = _matches_cache[league_id]
+        if now - cached["timestamp"] < CACHE_TTL:
+            return cached["matches"]
+
     try:
         url = f"{BASE_URL}/fixtures?league={league_id}"
         res = requests.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         data = res.json().get("response", [])
         if data:
+            _matches_cache[league_id] = {"timestamp": now, "matches": data}
             return data
 
         year = datetime.utcnow().year
@@ -91,7 +118,10 @@ def get_matches(league_id):
             res.raise_for_status()
             data = res.json().get("response", [])
             if data:
+                _matches_cache[league_id] = {"timestamp": now, "matches": data}
                 return data
+
+        _matches_cache[league_id] = {"timestamp": now, "matches": []}
         return []
     except Exception as e:
         print(f"Errore get_matches per lega {league_id}: {e}")
@@ -102,8 +132,7 @@ def get_matches(league_id):
 # --------------------------
 def search_teams(query):
     """
-    Cerca squadre in tutte le leghe e nazionali che contengono la stringa 'query'.
-    Ritorna lista di dict: {"team": <nome squadra>, "match_id": <id lega>}
+    Cerca squadre in tutte le leghe e nazionali usando la cache.
     """
     query = query.lower()
     results = []
@@ -121,7 +150,7 @@ def search_teams(query):
             if query in away.lower():
                 results.append({"team": away, "match_id": fixture_id})
 
-    # Rimuove duplicati basati su team + match_id
+    # Rimuove duplicati
     seen = set()
     unique_results = []
     for r in results:
