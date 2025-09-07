@@ -1,9 +1,15 @@
 from fastapi import FastAPI, Request
 from mine import start, handle_back
 from stripe_webhook import handle_stripe_event
+from db import init_db  # import DB init
 import uvicorn
 
 app = FastAPI()
+
+# --------------------------
+# Inizializza DB all'avvio
+# --------------------------
+init_db()
 
 # --------------------------
 # Telegram Webhook
@@ -11,16 +17,18 @@ app = FastAPI()
 @app.post("/webhook")
 async def telegram_webhook(update: Request):
     data = await update.json()
-    context = data.get("context", {})  # eventualmente passare context dal payload
-    if "message" in data:
-        return start(data, context)
-    elif "callback_query" in data:
-        cb_data = data["callback_query"]["data"]
-        last_state = context.get("last_state", None)
-        if cb_data == "back":
-            return handle_back(data, context, last_state)
-        return {"text": f"Callback ricevuto: {cb_data}"}
-    return {"text": "Aggiornamento non gestito"}
+    context = {}
+    try:
+        if "message" in data:
+            return start(data, context)
+        elif "callback_query" in data:
+            cb_data = data["callback_query"]["data"]
+            if cb_data == "back":
+                return handle_back(data, context, context.get("last_state"))
+            return {"text": f"Callback ricevuto: {cb_data}"}
+        return {"text": "Aggiornamento non gestito"}
+    except Exception as e:
+        return {"error": str(e)}
 
 # --------------------------
 # Stripe Webhook
@@ -28,9 +36,11 @@ async def telegram_webhook(update: Request):
 @app.post("/stripe-webhook")
 async def stripe_webhook(req: Request):
     payload = await req.body()
-    payload_str = payload.decode("utf-8")  # stripe richiede stringa
     sig_header = req.headers.get("stripe-signature")
-    return handle_stripe_event(payload_str, sig_header)
+    try:
+        return handle_stripe_event(payload, sig_header)
+    except Exception as e:
+        return {"error": str(e)}
 
 # --------------------------
 # Root test
