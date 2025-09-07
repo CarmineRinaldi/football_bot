@@ -145,7 +145,7 @@ def handle_callback(callback_data, update, context):
         return show_main_menu(update, context)
 
     # Selezione piano
-    if callback_data.startswith("plan_"):
+    if callback_data.startswith("plan_") and not callback_data.startswith("plan_search"):
         plan = callback_data.split("_")[1]
         return show_plan_info(update, context, plan)
 
@@ -159,7 +159,7 @@ def handle_callback(callback_data, update, context):
         plan = callback_data.split("_")[-1]
         return show_nationals(update, context, plan)
 
-    # Pagine campionati/nazionali con sicurezza
+    # Pagine campionati/nazionali
     if "_page_" in callback_data:
         parts = callback_data.split("_")
         prefix = parts[0]
@@ -173,10 +173,12 @@ def handle_callback(callback_data, update, context):
         else:
             return show_nationals(update, context, plan, page)
 
-    # Ricerca
+    # Ricerca: mostra prompt all'utente
     if callback_data.startswith("search_"):
         plan = callback_data.split("_")[1]
-        return {"text": "Scrivi il nome della squadra o del campionato da cercare:"}
+        # Salviamo il piano nel contesto per usarlo quando arriva il messaggio
+        context["awaiting_search"] = {"plan": plan}
+        return {"text": "🔍 Scrivi il nome della squadra o del campionato da cercare:"}
 
     # Risultati ricerca
     if callback_data.startswith("search_result_"):
@@ -192,3 +194,17 @@ def handle_callback(callback_data, update, context):
     if callback_data.startswith("match_"):
         match_id = callback_data.split("_")[1]
         return {"text": f"✅ Hai selezionato la partita {match_id}!"}
+
+
+# --------------------------
+# GESTIONE MESSAGGI TESTO (ricerca)
+# --------------------------
+
+def handle_message(update, context):
+    if context.get("awaiting_search"):
+        plan = context["awaiting_search"]["plan"]
+        query = update["message"]["text"].strip()
+        context["awaiting_search"] = None
+        return search_leagues(update, context, plan, query)
+    else:
+        return {"text": "⚠️ Comando non riconosciuto. Usa il menu."}
