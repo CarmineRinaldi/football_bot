@@ -1,9 +1,8 @@
 import os
 import logging
-from aiogram import Dispatcher, types
+from aiogram import Dispatcher
 from aiogram.client.bot import Bot, DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command
 from aiohttp import web
 
 # --- LOGGING ---
@@ -16,7 +15,7 @@ if not BOT_TOKEN:
     raise ValueError("Devi impostare la variabile TG_BOT_TOKEN!")
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # es: https://tuo-bot.onrender.com/webhook
-PORT = int(os.getenv("PORT", 8080))     # Render usa PORT in automatico
+PORT = int(os.getenv("PORT", 8080))
 
 # --- CREA BOT E DISPATCHER ---
 bot = Bot(
@@ -25,18 +24,15 @@ bot = Bot(
 )
 dp = Dispatcher()
 
-# --- HANDLER BASE ---
-@dp.message(Command("start"))
-async def start_handler(message: types.Message):
-    await message.answer("⚽ FootballBot è online con webhook!")
+# --- REGISTRA HANDLER ---
+from handlers import start_handler, plans_handler, search_handler
 
-# --- IMPORTA HANDLER PERSONALIZZATI ---
-from handlers import plans
-plans.register_handlers(dp)
+start_handler.register_handlers(dp)
+plans_handler.register_handlers(dp)
+search_handler.register_handlers(dp)
 
-# --- APP AIOHTTP ---
+# --- FUNZIONI DI STARTUP E SHUTDOWN ---
 async def on_startup(app: web.Application):
-    # Cancella vecchi webhook e imposta quello nuovo
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(WEBHOOK_URL)
     logger.info(f"Webhook impostato su {WEBHOOK_URL}")
@@ -44,6 +40,7 @@ async def on_startup(app: web.Application):
 async def on_shutdown(app: web.Application):
     await bot.session.close()
 
+# --- CREAZIONE APP AIOHTTP ---
 def main():
     app = web.Application()
     dp.setup(app)  # collega dispatcher ad aiohttp
