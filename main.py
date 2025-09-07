@@ -1,202 +1,123 @@
+from db import add_user, get_user_plan, add_ticket, get_user_tickets
+from football_api import get_leagues, get_national_teams, get_matches, search_teams, filter_by_letter
+from datetime import datetime
 import os
-import httpx
-from fastapi import FastAPI, Request
-from db import init_db, delete_old_tickets
-from bot_logic import (
-    start,
-    show_main_menu,
-    show_plan_info,
-    show_search_choice,
-    show_alphabet_keyboard,
-    show_filtered_options,
-    show_matches,
-    search_team_prompt,
-    show_search_results
-)
-from stripe_webhook import handle_stripe_event
+
+FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
+VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
 
 # --------------------------
-# Setup
+# Menu principale e piani
 # --------------------------
+def start(update, context):
+    user_id = update["message"]["from"]["id"]
+    add_user(user_id)
+    return show_main_menu(update, context)
 
-init_db()
-delete_old_tickets()
+def show_main_menu(update, context):
+    keyboard = [
+        [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
+        [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
+        [{"text": "VIP Monthly 👑", "callback_data": "plan_vip"}],
+        [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
+    ]
+    message = "⚽ Benvenuto nel tuo stadio personale!\nScegli un piano o controlla le tue schedine:"
+    return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
 
-app = FastAPI()
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-BASE_URL = f"https://api.telegram.org/bot{TG_BOT_TOKEN}"
+def show_plan_info(update, context, plan):
+    if plan == "free":
+        text = f"🆓 **Free Plan:** puoi fare fino a {FREE_MAX_MATCHES} pronostici al giorno, massimo 5 partite per pronostico!"
+    elif plan == "2eur":
+        text = "💶 **2€ Pack:** più pronostici giornalieri e funzionalità extra!"
+    else:
+        text = f"👑 **VIP:** massimo {VIP_MAX_MATCHES} pronostici al giorno, aggiornamenti e supporto VIP!"
 
-# Per memorizzare utenti in modalità "ricerca squadra"
-user_search_mode = {}
-# Per tracciare stack menu per "indietro"
-user_menu_stack = {}
-
-# --------------------------
-# Funzioni Telegram
-# --------------------------
-
-async def send_message(chat_id, text, reply_markup=None):
-    async with httpx.AsyncClient() as client:
-        res = await client.post(f"{BASE_URL}/sendMessage", json={
-            "chat_id": chat_id,
-            "text": text,
-            "reply_markup": reply_markup,
-            "parse_mode": "Markdown"
-        })
-        return res.json().get("result", {}).get("message_id")
-
-async def delete_message(chat_id, message_id):
-    async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/deleteMessage", json={
-            "chat_id": chat_id,
-            "message_id": message_id
-        })
-
-async def send_waiting_message(chat_id):
-    return await send_message(chat_id, "⏳ Attendere prego...")
+    keyboard = [
+        [{"text": "Campionati ⚽", "callback_data": f"select_type_league_{plan}"}],
+        [{"text": "Nazionali 🌍", "callback_data": f"select_type_national_{plan}"}],
+        [{"text": "Cerca squadra 🔎", "callback_data": f"search_team_{plan}"}],
+        [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
+    ]
+    return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
-# Webhook
+# Selezione tipo: lettera o nome
 # --------------------------
-
-@app.get("/")
-async def root():
-    return {"status": "Bot online!"}
-
-@app.post("/webhook")
-async def telegram_webhook(req: Request):
-    data = await req.json()
-    print("Webhook ricevuto:", data)
-
-    chat_id = None
-    plan = "free"
-
-    if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        message_id = data["message"]["message_id"]
-        text = data["message"].get("text")
-
-        # Modalità ricerca squadra
-        if user_search_mode.get(chat_id):
-            query = text.strip()
-            await delete_message(chat_id, message_id)
-            response = show_search_results(query, user_search_mode[chat_id])
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_search_mode.pop(chat_id)
-            user_menu_stack.pop(chat_id, None)
-            return {"status": 200}
-
-        if text == "/start":
-            await delete_message(chat_id, message_id)
-            response = start(data, None)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id] = [("main_menu", None)]
-            return {"status": 200}
-
-    if "callback_query" in data:
-        cb = data["callback_query"]
-        chat_id = cb["message"]["chat"]["id"]
-        message_id = cb["message"]["message_id"]
-        cb_data = cb["data"]
-
-        # Cancella messaggio precedente
-        await delete_message(chat_id, message_id)
-        waiting_msg_id = await send_waiting_message(chat_id)
-
-        # Menu principale
-        if cb_data == "main_menu":
-            response = show_main_menu(data, None)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id] = [("main_menu", None)]
-        
-        # Piani
-        elif cb_data.startswith("plan_"):
-            plan = cb_data.split("_")[1]
-            response = show_plan_info(data, None, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id] = [("plan_info", plan)]
-
-        # Selezione campionato/nazionale
-        elif cb_data.startswith("select_type_"):
-            parts = cb_data.split("_")
-            type_ = parts[2]  # league o national
-            plan = parts[3]
-            response = show_search_choice(type_, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("select_type", (type_, plan)))
-
-        # Ricerca lettere
-        elif cb_data.startswith("search_letter_"):
-            parts = cb_data.split("_")
-            type_ = parts[2]
-            plan = parts[3]
-            response = show_alphabet_keyboard(plan, type_)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("alphabet", (type_, plan)))
-
-        # Ricerca nome
-        elif cb_data.startswith("search_name_"):
-            type_ = cb_data.split("_")[2]
-            plan = cb_data.split("_")[3]
-            user_search_mode[chat_id] = type_
-            response = search_team_prompt(plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("search_team", plan))
-
-        # Filtri per lettera
-        elif cb_data.startswith("filter_"):
-            parts = cb_data.split("_")
-            type_ = parts[1]
-            letter = parts[2]
-            plan = parts[3]
-            response = show_filtered_options(type_, letter, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("filtered", (type_, letter, plan)))
-
-        # Mostra partite
-        elif cb_data.startswith("league_") or cb_data.startswith("national_"):
-            parts = cb_data.split("_")
-            league_id = int(parts[1])
-            plan = parts[2]
-            response = show_matches(data, None, league_id, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("matches", (league_id, plan)))
-
-        # Indietro
-        elif cb_data == "back":
-            if chat_id in user_menu_stack and len(user_menu_stack[chat_id]) > 1:
-                user_menu_stack[chat_id].pop()
-                last_menu = user_menu_stack[chat_id][-1]
-                kind, param = last_menu
-                if kind == "plan_info":
-                    response = show_plan_info(data, None, param)
-                elif kind == "alphabet":
-                    type_, plan = param
-                    response = show_alphabet_keyboard(plan, type_)
-                elif kind == "filtered":
-                    type_, letter, plan = param
-                    response = show_filtered_options(type_, letter, plan)
-                elif kind == "matches":
-                    league_id, plan = param
-                    response = show_matches(data, None, league_id, plan)
-                elif kind == "search_team":
-                    plan = param
-                    response = search_team_prompt(plan)
-                elif kind == "select_type":
-                    type_, plan = param
-                    response = show_search_choice(type_, plan)
-                elif kind == "main_menu":
-                    response = show_main_menu(data, None)
-                await send_message(chat_id, response["text"], response.get("reply_markup"))
-
-    return {"status": 200}
+def show_search_choice(type_, plan):
+    tipo_testo = "campionato" if type_ == "league" else "nazionale"
+    keyboard = [
+        [{"text": "Per lettera 🔤", "callback_data": f"search_letter_{type_}_{plan}"}],
+        [{"text": "Per nome 🔎", "callback_data": f"search_name_{type_}_{plan}"}],
+        [{"text": "🔙 Indietro", "callback_data": "back"}],
+        [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
+    ]
+    return {"text": f"🔍 Scegli come cercare il {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
-# Stripe webhook
+# Filtri alfabetici e ricerca
 # --------------------------
+def show_alphabet_keyboard(plan, type_):
+    keyboard = [[{"text": c, "callback_data": f"filter_{type_}_{c}_{plan}"}] for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
+    tipo_testo = "campionato" if type_ == "league" else "nazionale"
+    return {"text": f"🔤 Filtra per lettera iniziale del {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
 
-@app.post("/stripe_webhook")
-async def stripe_webhook(req: Request):
-    payload = await req.body()
-    sig_header = req.headers.get("stripe-signature")
-    return handle_stripe_event(payload, sig_header)
+def show_filtered_options(type_, letter, plan):
+    items = get_leagues() if type_ == "league" else get_national_teams()
+    filtered = filter_by_letter(items, "display_name", letter)
+
+    if not filtered:
+        return {
+            "text": f"😕 Nessun {type_} trovato con la lettera '{letter}'.",
+            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}
+        }
+
+    keyboard = [[{"text": o["display_name"], "callback_data": f"{type_}_{o['league']['id']}_{plan}"}] for o in filtered]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
+    return {"text": f"🏟️ Seleziona {type_}:", "reply_markup": {"inline_keyboard": keyboard}}
+
+# --------------------------
+# Mostra partite
+# --------------------------
+def show_matches(update, context, league_id, plan):
+    matches = get_matches(league_id)
+    if not matches:
+        return {
+            "text": "⚽ Nessuna partita disponibile per questa competizione!",
+            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}
+        }
+
+    keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}",
+                  "callback_data": f"match_{m['fixture']['id']}_{plan}"}] for m in matches]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
+    return {
+        "text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
+        "reply_markup": {"inline_keyboard": keyboard}
+    }
+
+# --------------------------
+# Ricerca squadra
+# --------------------------
+def search_team_prompt(plan):
+    return {"text": "🔎 Scrivi il nome della squadra che vuoi cercare:", "reply_markup": None}
+
+def show_search_results(query, plan, type_=None):
+    results = search_teams(query, type_)
+    if not results:
+        return {
+            "text": f"😕 Nessun risultato trovato per '{query}'.",
+            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}
+        }
+
+    keyboard = [[{"text": r["team"], "callback_data": f"team_{r['match_id']}_{plan}"}] for r in results]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
+    return {"text": f"🔍 Risultati per '{query}':", "reply_markup": {"inline_keyboard": keyboard}}
+
+# --------------------------
+# Gestione tasti generici
+# --------------------------
+def handle_back(update, context, last_state):
+    if last_state == "plan_info":
+        return show_plan_info(update, context, context.get("current_plan"))
+    else:
+        return show_main_menu(update, context)
