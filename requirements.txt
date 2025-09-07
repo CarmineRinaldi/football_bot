@@ -1,7 +1,6 @@
 aiogram==3.0.0
+pydantic==2.8.0
 requests
 stripe
 aiofiles~=23.1.0
 aiohttp~=3.8.6
-pydantic==2.11.7
-pydantic-core==2.33.2
