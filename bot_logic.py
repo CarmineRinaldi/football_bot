@@ -7,7 +7,7 @@ FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
 VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
 
 # --------------------------
-# Funzioni menu principale
+# Menu principale
 # --------------------------
 
 def start(update, context):
@@ -34,26 +34,12 @@ def show_plan_info(update, context, plan):
         text = f"👑 **VIP:** massimo {VIP_MAX_MATCHES} pronostici al giorno, aggiornamenti e supporto VIP!"
 
     keyboard = [
-        [{"text": "Campionati ⚽", "callback_data": f"select_type_league_{plan}"}],
-        [{"text": "Nazionali 🌍", "callback_data": f"select_type_national_{plan}"}],
+        [{"text": "Campionati ⚽", "callback_data": f"select_league_{plan}"}],
+        [{"text": "Nazionali 🌍", "callback_data": f"select_national_{plan}"}],
         [{"text": "Cerca squadra 🔎", "callback_data": f"search_team_{plan}"}],
         [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
     ]
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
-
-# --------------------------
-# Primo livello scelta campionato/nazionale
-# --------------------------
-
-def show_search_choice(type_, plan):
-    tipo_testo = "campionato" if type_ == "league" else "nazionale"
-    keyboard = [
-        [{"text": "Cerca per lettera 🔤", "callback_data": f"search_letter_{type_}_{plan}"}],
-        [{"text": "Cerca nome 🔎", "callback_data": f"search_name_{type_}_{plan}"}],
-        [{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}],
-        [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
-    ]
-    return {"text": f"🔍 Scegli come cercare il {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
 # Tastiere alfabetiche e filtraggio
@@ -61,7 +47,7 @@ def show_search_choice(type_, plan):
 
 def show_alphabet_keyboard(plan, type_):
     keyboard = [[{"text": c, "callback_data": f"filter_{type_}_{c}_{plan}"}] for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_type_{type_}_{plan}"}])
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_{type_}_{plan}"}])
     tipo_testo = "campionato" if type_ == "league" else "nazionale"
     return {"text": f"🔤 Filtra per lettera iniziale del {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
 
@@ -69,7 +55,7 @@ def show_filtered_options(type_, letter, plan):
     if type_ == "league":
         options = get_leagues()
         filtered = [o for o in options if o["league"]["name"].upper().startswith(letter.upper())]
-    else:  # nazionali
+    else:
         options = get_national_teams()
         filtered = [o for o in options if o["name"].upper().startswith(letter.upper())]
 
@@ -93,15 +79,14 @@ def show_filtered_options(type_, letter, plan):
 
 def show_matches(update, context, league_id, plan):
     matches = get_matches(league_id)
-
     if not matches:
         return {
             "text": "⚽ Nessuna partita disponibile per questa competizione!",
-            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"select_type_league_{plan}"}]]}
+            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}]]}
         }
 
     keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}", 
-                  "callback_data": f"match_{m['fixture']['id']}"}] for m in matches]
+                  "callback_data": f"match_{m['fixture']['id']}_{plan}"}] for m in matches]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"filter_league_A_{plan}"}])
     return {
         "text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
