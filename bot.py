@@ -1,9 +1,9 @@
 import os
 import logging
-from aiogram import Dispatcher
-from aiogram.client.bot import Bot, DefaultBotProperties
-from aiogram.enums import ParseMode
 from aiohttp import web
+from aiogram import Bot, Dispatcher
+from aiogram.client.bot import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -15,23 +15,21 @@ if not BOT_TOKEN:
     raise ValueError("Devi impostare la variabile TG_BOT_TOKEN!")
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # es: https://tuo-bot.onrender.com/webhook
-PORT = int(os.getenv("PORT", 8080))
+PORT = int(os.getenv("PORT", 8080))     # Render usa la variabile PORT
 
 # --- CREA BOT E DISPATCHER ---
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# --- REGISTRA HANDLER ---
-from handlers import start_handler, plans_handler, search_handler
+# --- IMPORT HANDLER ---
+from handlers import start, plans, search
 
-start_handler.register_handlers(dp)
-plans_handler.register_handlers(dp)
-search_handler.register_handlers(dp)
+# registra tutti gli handler
+start.register_handlers(dp)
+plans.register_handlers(dp)
+search.register_handlers(dp)
 
-# --- FUNZIONI DI STARTUP E SHUTDOWN ---
+# --- HANDLER WEBHOOK ---
 async def on_startup(app: web.Application):
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(WEBHOOK_URL)
@@ -39,16 +37,20 @@ async def on_startup(app: web.Application):
 
 async def on_shutdown(app: web.Application):
     await bot.session.close()
+    logger.info("Bot chiuso correttamente.")
 
-# --- CREAZIONE APP AIOHTTP ---
-def main():
-    app = web.Application()
-    dp.setup(app)  # collega dispatcher ad aiohttp
+async def handle_webhook(request: web.Request):
+    data = await request.json()
+    update = dp.bot.update_factory(data)
+    await dp.process_update(update)
+    return web.Response(text="OK")
 
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
+# --- APP AIOHTTP ---
+app = web.Application()
+app.router.add_post("/webhook", handle_webhook)
+app.on_startup.append(on_startup)
+app.on_shutdown.append(on_shutdown)
 
-    web.run_app(app, host="0.0.0.0", port=PORT)
-
+# --- RUN APP ---
 if __name__ == "__main__":
-    main()
+    web.run_app(app, host="0.0.0.0", port=PORT)
