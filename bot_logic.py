@@ -176,7 +176,6 @@ def handle_callback(callback_data, update, context):
     # Ricerca: mostra prompt all'utente
     if callback_data.startswith("search_"):
         plan = callback_data.split("_")[1]
-        # Salviamo il piano nel contesto per usarlo quando arriva il messaggio
         context["awaiting_search"] = {"plan": plan}
         return {"text": "🔍 Scrivi il nome della squadra o del campionato da cercare:"}
 
