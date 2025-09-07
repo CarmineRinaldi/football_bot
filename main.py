@@ -97,53 +97,48 @@ async def telegram_webhook(req: Request):
         await delete_message(chat_id, message_id)
         waiting_msg_id = await send_waiting_message(chat_id)
 
+        # --------------------------
         # Menu principale
+        # --------------------------
         if cb_data == "main_menu":
             response = show_main_menu(data, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id] = [("main_menu", None)]
-        
+
+        # --------------------------
         # Piani
+        # --------------------------
         elif cb_data.startswith("plan_"):
             plan = cb_data.split("_")[1]
             response = show_plan_info(data, None, plan)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id] = [("plan_info", plan)]
 
-        # Selezione campionato/nazionale
-        elif cb_data.startswith("select_league_"):
-            plan = cb_data.split("_")[-1]
+        # --------------------------
+        # Selezione Campionato/Nazionale
+        # --------------------------
+        elif cb_data.startswith("select_league_") or cb_data.startswith("select_national_"):
+            parts = cb_data.split("_")
+            type_ = "league" if "league" in cb_data else "national"
+            plan = parts[-1]
+            tipo_testo = "campionati" if type_ == "league" else "nazionali"
             response = {
-                "text": "🔍 Filtra campionati per lettera o cerca per nome:",
+                "text": f"🔍 Filtra {tipo_testo} per lettera o cerca per nome:",
                 "reply_markup": {
                     "inline_keyboard": [
-                        [{"text": "Per lettera", "callback_data": f"search_letter_league_{plan}"}],
-                        [{"text": "Per nome", "callback_data": f"search_name_league_{plan}"}],
+                        [{"text": "Per lettera", "callback_data": f"search_letter_{type_}_{plan}"}],
+                        [{"text": "Per nome", "callback_data": f"search_name_{type_}_{plan}"}],
                         [{"text": "🔙 Indietro", "callback_data": "back"}],
                         [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
                     ]
                 }
             }
             await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("select_type", ("league", plan)))
-        
-        elif cb_data.startswith("select_national_"):
-            plan = cb_data.split("_")[-1]
-            response = {
-                "text": "🔍 Filtra nazionali per lettera o cerca per nome:",
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [{"text": "Per lettera", "callback_data": f"search_letter_national_{plan}"}],
-                        [{"text": "Per nome", "callback_data": f"search_name_national_{plan}"}],
-                        [{"text": "🔙 Indietro", "callback_data": "back"}],
-                        [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
-                    ]
-                }
-            }
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("select_type", ("national", plan)))
+            user_menu_stack[chat_id].append(("select_type", (type_, plan)))
 
+        # --------------------------
         # Ricerca lettere
+        # --------------------------
         elif cb_data.startswith("search_letter_"):
             parts = cb_data.split("_")
             type_ = parts[2]
@@ -152,7 +147,9 @@ async def telegram_webhook(req: Request):
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("alphabet", (type_, plan)))
 
+        # --------------------------
         # Ricerca nome
+        # --------------------------
         elif cb_data.startswith("search_name_"):
             type_ = cb_data.split("_")[2]
             plan = cb_data.split("_")[3]
@@ -161,7 +158,9 @@ async def telegram_webhook(req: Request):
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("search_team", plan))
 
+        # --------------------------
         # Filtri per lettera
+        # --------------------------
         elif cb_data.startswith("filter_"):
             parts = cb_data.split("_")
             type_ = parts[1]
@@ -171,7 +170,9 @@ async def telegram_webhook(req: Request):
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("filtered", (type_, letter, plan)))
 
+        # --------------------------
         # Mostra partite
+        # --------------------------
         elif cb_data.startswith("league_") or cb_data.startswith("national_"):
             parts = cb_data.split("_")
             league_id = int(parts[1])
@@ -180,7 +181,9 @@ async def telegram_webhook(req: Request):
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("matches", (league_id, plan)))
 
+        # --------------------------
         # Indietro
+        # --------------------------
         elif cb_data == "back":
             if chat_id in user_menu_stack and len(user_menu_stack[chat_id]) > 1:
                 user_menu_stack[chat_id].pop()
@@ -202,8 +205,9 @@ async def telegram_webhook(req: Request):
                     response = search_team_prompt(plan)
                 elif kind == "select_type":
                     type_, plan = param
+                    tipo_testo = "campionati" if type_ == "league" else "nazionali"
                     response = {
-                        "text": f"🔍 Filtra {type_} per lettera o cerca per nome:",
+                        "text": f"🔍 Filtra {tipo_testo} per lettera o cerca per nome:",
                         "reply_markup": {
                             "inline_keyboard": [
                                 [{"text": "Per lettera", "callback_data": f"search_letter_{type_}_{plan}"}],
