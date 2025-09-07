@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from bot_logic import start, show_main_menu
 from db import init_db
+from bot_logic import start, show_main_menu, send_message
 import uvicorn
 
 app = FastAPI()
@@ -17,28 +16,36 @@ init_db()
 @app.post("/webhook")
 async def telegram_webhook(update: Request):
     data = await update.json()
-    
-    # --------------------------
-    # Messaggi
-    # --------------------------
+
+    # ----------------------
+    # Messaggio standard
+    # ----------------------
     if "message" in data:
-        start(data, context={})  # ✅ Ora start invia direttamente il messaggio
-        return JSONResponse(content={"status": "ok"})
+        start(data, {})  # il bot invia messaggi con send_message
+        return {"ok": True}
 
-    # --------------------------
-    # Callback query
-    # --------------------------
+    # ----------------------
+    # Callback inline
+    # ----------------------
     elif "callback_query" in data:
-        cb_data = data["callback_query"]["data"]
+        cb = data["callback_query"]
+        cb_data = cb["data"]
+        chat_id = cb["message"]["chat"]["id"]
 
+        # Bottone "Indietro"
         if cb_data == "back":
-            show_main_menu(data["callback_query"]["message"]["chat"]["id"])
-            return JSONResponse(content={"status": "ok"})
+            show_main_menu(chat_id)
+        # Puoi aggiungere altri callback qui
+        else:
+            send_message(chat_id, f"Callback ricevuto: {cb_data}")
 
-        # Qui puoi gestire altri callback
-        return JSONResponse(content={"status": "callback ricevuto", "data": cb_data})
+        # Rispondi sempre a Telegram per chiudere il "loading" del bottone
+        return {"ok": True}
 
-    return JSONResponse(content={"status": "aggiornamento non gestito"})
+    # ----------------------
+    # Aggiornamento non gestito
+    # ----------------------
+    return {"ok": True}
 
 
 @app.get("/")
