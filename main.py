@@ -70,6 +70,7 @@ async def telegram_webhook(req: Request):
         message_id = data["message"]["message_id"]
         text = data["message"].get("text")
 
+        # Modalità ricerca squadra
         if user_search_mode.get(chat_id):
             query = text.strip()
             await delete_message(chat_id, message_id)
@@ -109,17 +110,56 @@ async def telegram_webhook(req: Request):
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id] = [("plan_info", plan)]
 
-        # Selezione alfabetica
+        # Selezione campionato/nazionale
         elif cb_data.startswith("select_league_"):
             plan = cb_data.split("_")[-1]
-            response = show_alphabet_keyboard(plan, "league")
+            response = {
+                "text": "🔍 Filtra campionati per lettera o cerca per nome:",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "Per lettera", "callback_data": f"search_letter_league_{plan}"}],
+                        [{"text": "Per nome", "callback_data": f"search_name_league_{plan}"}],
+                        [{"text": "🔙 Indietro", "callback_data": "back"}],
+                        [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
+                    ]
+                }
+            }
             await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("alphabet", ("league", plan)))
+            user_menu_stack[chat_id].append(("select_type", ("league", plan)))
+        
         elif cb_data.startswith("select_national_"):
             plan = cb_data.split("_")[-1]
-            response = show_alphabet_keyboard(plan, "national")
+            response = {
+                "text": "🔍 Filtra nazionali per lettera o cerca per nome:",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "Per lettera", "callback_data": f"search_letter_national_{plan}"}],
+                        [{"text": "Per nome", "callback_data": f"search_name_national_{plan}"}],
+                        [{"text": "🔙 Indietro", "callback_data": "back"}],
+                        [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
+                    ]
+                }
+            }
             await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("alphabet", ("national", plan)))
+            user_menu_stack[chat_id].append(("select_type", ("national", plan)))
+
+        # Ricerca lettere
+        elif cb_data.startswith("search_letter_"):
+            parts = cb_data.split("_")
+            type_ = parts[2]
+            plan = parts[3]
+            response = show_alphabet_keyboard(plan, type_)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
+            user_menu_stack[chat_id].append(("alphabet", (type_, plan)))
+
+        # Ricerca nome
+        elif cb_data.startswith("search_name_"):
+            type_ = cb_data.split("_")[2]
+            plan = cb_data.split("_")[3]
+            user_search_mode[chat_id] = type_
+            response = search_team_prompt(plan)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
+            user_menu_stack[chat_id].append(("search_team", plan))
 
         # Filtri per lettera
         elif cb_data.startswith("filter_"):
@@ -140,27 +180,10 @@ async def telegram_webhook(req: Request):
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("matches", (league_id, plan)))
 
-        # Modalità ricerca squadra
-        elif cb_data.startswith("search_team_"):
-            plan = cb_data.split("_")[-1]
-            user_search_mode[chat_id] = plan
-            response = search_team_prompt(plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("search_team", plan))
-
-        # Click su squadra dai risultati ricerca
-        elif cb_data.startswith("team_"):
-            parts = cb_data.split("_")
-            match_id = int(parts[1])
-            plan = parts[2]
-            response = show_matches(data, None, match_id, plan)
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("matches", (match_id, plan)))
-
         # Indietro
         elif cb_data == "back":
             if chat_id in user_menu_stack and len(user_menu_stack[chat_id]) > 1:
-                user_menu_stack[chat_id].pop()  # rimuovi corrente
+                user_menu_stack[chat_id].pop()
                 last_menu = user_menu_stack[chat_id][-1]
                 kind, param = last_menu
                 if kind == "plan_info":
@@ -177,6 +200,19 @@ async def telegram_webhook(req: Request):
                 elif kind == "search_team":
                     plan = param
                     response = search_team_prompt(plan)
+                elif kind == "select_type":
+                    type_, plan = param
+                    response = {
+                        "text": f"🔍 Filtra {type_} per lettera o cerca per nome:",
+                        "reply_markup": {
+                            "inline_keyboard": [
+                                [{"text": "Per lettera", "callback_data": f"search_letter_{type_}_{plan}"}],
+                                [{"text": "Per nome", "callback_data": f"search_name_{type_}_{plan}"}],
+                                [{"text": "🔙 Indietro", "callback_data": "back"}],
+                                [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
+                            ]
+                        }
+                    }
                 elif kind == "main_menu":
                     response = show_main_menu(data, None)
                 await send_message(chat_id, response["text"], response.get("reply_markup"))
