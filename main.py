@@ -20,10 +20,8 @@ app = FastAPI()
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 BASE_URL = f"https://api.telegram.org/bot{TG_BOT_TOKEN}"
 
-# Memorizza utenti in modalità "ricerca squadra"
-user_search_mode = {}
-# Traccia stack menu per "indietro"
-user_menu_stack = {}
+user_search_mode = {}      # utente in modalità ricerca
+user_menu_stack = {}       # stack menu per "indietro"
 
 # --------------------------
 # Funzioni Telegram
@@ -60,7 +58,6 @@ async def root():
 @app.post("/webhook")
 async def telegram_webhook(req: Request):
     data = await req.json()
-    print("Webhook ricevuto:", data)
 
     chat_id = None
     plan = "free"
@@ -93,43 +90,27 @@ async def telegram_webhook(req: Request):
         message_id = cb["message"]["message_id"]
         cb_data = cb["data"]
 
-        # Mostra messaggio di attesa
-        waiting_msg_id = await send_waiting_message(chat_id)
-        # Cancella messaggio precedente
         await delete_message(chat_id, message_id)
+        waiting_msg_id = await send_waiting_message(chat_id)
 
         # Menu principale
         if cb_data == "main_menu":
             response = show_main_menu(data, None)
-            await delete_message(chat_id, waiting_msg_id)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id] = [("main_menu", None)]
-        
+
         # Piani
         elif cb_data.startswith("plan_"):
             plan = cb_data.split("_")[1]
             response = show_plan_info(data, None, plan)
-            await delete_message(chat_id, waiting_msg_id)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id] = [("plan_info", plan)]
 
-        # Selezione campionato/nazionale
+        # Selezione tipo
         elif cb_data.startswith("select_type_"):
             type_ = cb_data.split("_")[2]
             plan = cb_data.split("_")[3]
-            tipo_testo = "campionati" if type_ == "league" else "nazionali"
-            response = {
-                "text": f"🔍 Filtra {tipo_testo} per lettera o cerca per nome:",
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [{"text": "Per lettera", "callback_data": f"search_letter_{type_}_{plan}"}],
-                        [{"text": "Per nome", "callback_data": f"search_name_{type_}_{plan}"}],
-                        [{"text": "🔙 Indietro", "callback_data": "back"}],
-                        [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
-                    ]
-                }
-            }
-            await delete_message(chat_id, waiting_msg_id)
+            response = show_search_choice(type_, plan)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("select_type", (type_, plan)))
 
@@ -139,17 +120,15 @@ async def telegram_webhook(req: Request):
             type_ = parts[2]
             plan = parts[3]
             response = show_alphabet_keyboard(plan, type_)
-            await delete_message(chat_id, waiting_msg_id)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("alphabet", (type_, plan)))
 
-        # Ricerca nome/squadra
+        # Ricerca nome squadra
         elif cb_data.startswith("search_name_"):
             type_ = cb_data.split("_")[2]
             plan = cb_data.split("_")[3]
             user_search_mode[chat_id] = type_
             response = search_team_prompt(plan)
-            await delete_message(chat_id, waiting_msg_id)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("search_team", plan))
 
@@ -160,7 +139,6 @@ async def telegram_webhook(req: Request):
             letter = parts[2]
             plan = parts[3]
             response = show_filtered_options(type_, letter, plan)
-            await delete_message(chat_id, waiting_msg_id)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("filtered", (type_, letter, plan)))
 
@@ -170,7 +148,6 @@ async def telegram_webhook(req: Request):
             league_id = int(parts[1])
             plan = parts[2]
             response = show_matches(data, None, league_id, plan)
-            await delete_message(chat_id, waiting_msg_id)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("matches", (league_id, plan)))
 
@@ -196,21 +173,9 @@ async def telegram_webhook(req: Request):
                     response = search_team_prompt(plan)
                 elif kind == "select_type":
                     type_, plan = param
-                    tipo_testo = "campionati" if type_ == "league" else "nazionali"
-                    response = {
-                        "text": f"🔍 Filtra {tipo_testo} per lettera o cerca per nome:",
-                        "reply_markup": {
-                            "inline_keyboard": [
-                                [{"text": "Per lettera", "callback_data": f"search_letter_{type_}_{plan}"}],
-                                [{"text": "Per nome", "callback_data": f"search_name_{type_}_{plan}"}],
-                                [{"text": "🔙 Indietro", "callback_data": "back"}],
-                                [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
-                            ]
-                        }
-                    }
+                    response = show_search_choice(type_, plan)
                 elif kind == "main_menu":
                     response = show_main_menu(data, None)
-                await delete_message(chat_id, waiting_msg_id)
                 await send_message(chat_id, response["text"], response.get("reply_markup"))
 
     return {"status": 200}
