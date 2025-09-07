@@ -1,11 +1,10 @@
-import os
-import asyncio
-import random
 from aiogram import types, Dispatcher
 from .buttons import back_home
 from utils.db import add_ticket, get_tickets
+import os
+import asyncio
+import random
 
-# --- COSTANTI ---
 FREE_MAX = int(os.environ.get("FREE_MAX_MATCHES", 5))
 VIP_MAX = int(os.environ.get("VIP_MAX_MATCHES", 20))
 
@@ -17,7 +16,6 @@ WAIT_MESSAGES = [
     "🏃‍♂️ Corro tra i campi per selezionare le partite migliori!"
 ]
 
-# --- FUNZIONI ---
 async def send_wait_message(chat_id, bot):
     msg = await bot.send_message(chat_id, random.choice(WAIT_MESSAGES))
     await asyncio.sleep(1.5)
@@ -46,8 +44,5 @@ async def my_tickets(message: types.Message):
     else:
         await message.answer("Non hai schedine attive 😢", reply_markup=back_home())
 
-# --- REGISTRA HANDLER ---
 def register_handlers(dp: Dispatcher):
-    dp.message.register(lambda m, b=dp.bot: plan_free(m, b), lambda m: "Free" in m.text)
-    dp.message.register(lambda m, b=dp.bot: plan_vip(m, b), lambda m: "VIP" in m.text)
-    dp.message.register(my_tickets, lambda m: "schedine" in m.text.lower())
+    dp.message.register(lambda m: plan_free(m, dp.bot), lambda m: "Free" in m.text)_
