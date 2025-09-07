@@ -1,11 +1,11 @@
 import os
 import logging
 import asyncio
-from aiogram import types, F
+from aiogram import types
 from aiogram.client.bot import Bot, DefaultBotProperties
-from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.utils.keyboard import CallbackData
+from aiogram.filters.callback_data import CallbackData
+from aiogram import Dispatcher
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -27,28 +27,31 @@ STRIPE_PRICE_2EUR = os.getenv("STRIPE_PRICE_2EUR")
 STRIPE_PRICE_VIP = os.getenv("STRIPE_PRICE_VIP")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# --- CALLBACK DATA E BOT ---
-example_cb = CallbackData("example", "action", "id")
+# --- CALLBACK DATA ---
+class ExampleCB(CallbackData, prefix="example"):
+    action: str
+    id: str
 
+# --- BOT ---
 bot = Bot(
     token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    default=DefaultBotProperties(parse_mode="HTML")  # parse_mode corretto
 )
+
+# --- DISPATCHER ---
+dp = Dispatcher()
 
 # --- HANDLER DI ESEMPIO ---
 async def start_handler(message: types.Message):
     await message.answer("⚽ FootballBot è online! Pronti a fare pronostici vincenti!")
 
 # --- REGISTRA HANDLER ---
-from aiogram import Dispatcher
-dp = Dispatcher()
 dp.message.register(start_handler, Command("start"))
 
 # --- RUN BOT ---
 async def main():
-    # Se vuoi usare webhook su Render, qui puoi aggiungere la registrazione:
+    # Se vuoi usare webhook su Render:
     # await bot.set_webhook(WEBHOOK_URL)
-    
     logger.info("Bot avviato...")
     await dp.start_polling(bot)
 
@@ -57,3 +60,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logger.info("Bot fermato manualmente.")
+
