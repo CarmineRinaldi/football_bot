@@ -1,7 +1,7 @@
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from handlers import start, plans, search, buttons
+from handlers import start, plans, search
 from utils.db import init_db
 
 # Inizializzazione database
