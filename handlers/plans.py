@@ -18,8 +18,8 @@ WAIT_MESSAGES = [
 
 async def send_wait_message(chat_id, bot):
     msg = await bot.send_message(chat_id, random.choice(WAIT_MESSAGES))
-    await asyncio.sleep(1.5)  # Attesa simulata
-    await msg.delete()  # Cancella il messaggio di attesa
+    await asyncio.sleep(1.5)
+    await msg.delete()
 
 async def plan_free(message: types.Message, bot):
     await send_wait_message(message.chat.id, bot)
