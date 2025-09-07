@@ -71,7 +71,7 @@ def show_filtered_options(type_, letter, plan):
         filtered = [o for o in options if o["league"]["name"].upper().startswith(letter.upper())]
     else:
         options = get_national_teams()
-        filtered = [o for o in options if o["name"].upper().startswith(letter.upper())]
+        filtered = [o for o in options if o["league"]["name"].upper().startswith(letter.upper())]
 
     if not filtered:
         return {
@@ -82,7 +82,7 @@ def show_filtered_options(type_, letter, plan):
     if type_ == "league":
         keyboard = [[{"text": o["display_name"], "callback_data": f"league_{o['league']['id']}_{plan}"}] for o in filtered]
     else:
-        keyboard = [[{"text": o["name"], "callback_data": f"national_{o['id']}_{plan}"}] for o in filtered]
+        keyboard = [[{"text": o["display_name"], "callback_data": f"national_{o['league']['id']}_{plan}"}] for o in filtered]
 
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     return {"text": f"🏟️ Seleziona {type_}:", "reply_markup": {"inline_keyboard": keyboard}}
@@ -115,7 +115,7 @@ def search_team_prompt(plan):
     return {"text": "🔎 Scrivi il nome della squadra che vuoi cercare:", "reply_markup": None}
 
 def show_search_results(query, plan, type_=None):
-    results = search_teams(query, type_)
+    results = search_teams(query)
     if not results:
         return {
             "text": f"😕 Nessun risultato trovato per '{query}'.",
@@ -125,3 +125,25 @@ def show_search_results(query, plan, type_=None):
     keyboard = [[{"text": r["team"], "callback_data": f"team_{r['match_id']}_{plan}"}] for r in results]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     return {"text": f"🔍 Risultati per '{query}':", "reply_markup": {"inline_keyboard": keyboard}}
+
+# --------------------------
+# Funzioni pronostici
+# --------------------------
+
+def can_create_pronostic(user_id, plan):
+    tickets = get_user_tickets(user_id)
+    max_per_day = FREE_MAX_MATCHES if plan == "free" else VIP_MAX_MATCHES
+    today = datetime.utcnow().date()
+    today_tickets = [t for t in tickets if datetime.fromisoformat(t[2]).date() == today]
+    return len(today_tickets) < max_per_day
+
+def create_ticket(user_id, match_ids, plan):
+    if len(match_ids) > 5:
+        match_ids = match_ids[:5]
+
+    if not can_create_pronostic(user_id, plan):
+        return {"text": f"⚠️ Hai già creato {FREE_MAX_MATCHES if plan=='free' else VIP_MAX_MATCHES} pronostici oggi!"}
+
+    add_ticket(user_id, match_ids)
+    total_today = len([t for t in get_user_tickets(user_id) if datetime.fromisoformat(t[2]).date() == datetime.utcnow().date()])
+    return {"text": f"✅ Pronostico creato con {len(match_ids)} partite!\nPronostico numero {total_today} di oggi."}
