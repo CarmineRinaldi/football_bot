@@ -7,12 +7,16 @@ import string
 # Funzioni menu principale
 # --------------------------
 
-def start(update, context):
+def start(update, context=None):
+    if context is None:
+        context = {}
     user_id = update["message"]["from"]["id"]
     add_user(user_id)
     return show_main_menu(update, context)
 
-def show_main_menu(update, context):
+def show_main_menu(update, context=None):
+    if context is None:
+        context = {}
     keyboard = [
         [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
         [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
@@ -21,12 +25,17 @@ def show_main_menu(update, context):
     ]
     message = "⚽ Benvenuto nel tuo stadio personale!\nScegli un piano o controlla le tue schedine:"
     
-    # Salva l'id del messaggio per eventuale cancellazione
-    context["delete_previous_message"] = update["message"]["message_id"]
+    if "message" in update:
+        context["delete_previous_message"] = update["message"]["message_id"]
     
     return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
 
-def show_plan_info(update, context, plan):
+def show_plan_info(update, context=None, plan=None):
+    if context is None:
+        context = {}
+    if plan is None:
+        plan = "free"
+
     if plan == "free":
         text = "🆓 **Free Plan:** puoi fare fino a 5 pronostici al giorno, massimo 5 partite per pronostico!"
     elif plan == "2eur":
@@ -41,8 +50,8 @@ def show_plan_info(update, context, plan):
         [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
     ]
     
-    # Salva id del messaggio precedente
-    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    if "callback_query" in update and "message" in update["callback_query"]:
+        context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
     
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
@@ -69,7 +78,9 @@ def create_league_keyboard(leagues, page, total_pages, plan, prefix):
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
     return keyboard
 
-def show_leagues(update, context, plan, page=0):
+def show_leagues(update, context=None, plan=None, page=0):
+    if context is None:
+        context = {}
     leagues = get_leagues()
     if not leagues:
         return {"text": "😕 Nessun campionato disponibile.", "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}}
@@ -77,11 +88,14 @@ def show_leagues(update, context, plan, page=0):
     page_items, total_pages = paginate_items(leagues, page)
     keyboard = create_league_keyboard(page_items, page, total_pages, plan, "league")
     
-    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    if "callback_query" in update and "message" in update["callback_query"]:
+        context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
     
     return {"text": "🏟️ Seleziona un campionato (max 5 partite):", "reply_markup": {"inline_keyboard": keyboard}}
 
-def show_nationals(update, context, plan, page=0):
+def show_nationals(update, context=None, plan=None, page=0):
+    if context is None:
+        context = {}
     leagues = get_national_teams()
     if not leagues:
         return {"text": "🌍 Nessuna nazionale disponibile.", "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}}
@@ -89,7 +103,8 @@ def show_nationals(update, context, plan, page=0):
     page_items, total_pages = paginate_items(leagues, page)
     keyboard = create_league_keyboard(page_items, page, total_pages, plan, "national")
     
-    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    if "callback_query" in update and "message" in update["callback_query"]:
+        context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
     
     return {"text": "🌍 Seleziona una nazionale (max 5 partite):", "reply_markup": {"inline_keyboard": keyboard}}
 
@@ -97,7 +112,9 @@ def show_nationals(update, context, plan, page=0):
 # Funzione ricerca
 # --------------------------
 
-def search_leagues(update, context, plan, query):
+def search_leagues(update, context=None, plan=None, query=""):
+    if context is None:
+        context = {}
     all_leagues = get_leagues() + get_national_teams()
     results = [l for l in all_leagues if query.lower() in l["display_name"].lower()]
 
@@ -107,7 +124,8 @@ def search_leagues(update, context, plan, query):
     keyboard = [[{"text": l["display_name"], "callback_data": f"search_result_{l['league']['id']}_{plan}"}] for l in results[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
     
-    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    if "callback_query" in update and "message" in update["callback_query"]:
+        context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
     
     return {"text": f"🔎 Risultati per '{query}':", "reply_markup": {"inline_keyboard": keyboard}}
 
@@ -115,7 +133,9 @@ def search_leagues(update, context, plan, query):
 # Funzioni partite
 # --------------------------
 
-def show_matches(update, context, league_id, plan):
+def show_matches(update, context=None, league_id=None, plan=None):
+    if context is None:
+        context = {}
     matches = get_matches(league_id)
     if not matches:
         return {"text": "⚽ Nessuna partita disponibile.", "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}]]}}
@@ -123,7 +143,8 @@ def show_matches(update, context, league_id, plan):
     keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}", "callback_data": f"match_{m['fixture']['id']}"}] for m in matches[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}])
     
-    context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+    if "callback_query" in update and "message" in update["callback_query"]:
+        context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
     
     return {"text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:", "reply_markup": {"inline_keyboard": keyboard}}
 
@@ -152,7 +173,9 @@ def create_ticket(user_id, match_ids):
 # GESTORE CALLBACK COMPLETO
 # --------------------------
 
-def handle_callback(callback_data, update, context):
+def handle_callback(callback_data, update, context=None):
+    if context is None:
+        context = {}
     user_id = update["callback_query"]["from"]["id"]
 
     # Menu principale
@@ -192,7 +215,8 @@ def handle_callback(callback_data, update, context):
     if callback_data.startswith("search_"):
         plan = callback_data.split("_")[1]
         context["awaiting_search"] = {"plan": plan}
-        context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
+        if "callback_query" in update and "message" in update["callback_query"]:
+            context["delete_previous_message"] = update["callback_query"]["message"]["message_id"]
         return {"text": "🔍 Scrivi il nome della squadra o del campionato da cercare:"}
 
     # Risultati ricerca
@@ -214,7 +238,9 @@ def handle_callback(callback_data, update, context):
 # GESTIONE MESSAGGI TESTO (ricerca)
 # --------------------------
 
-def handle_message(update, context):
+def handle_message(update, context=None):
+    if context is None:
+        context = {}
     if context.get("awaiting_search"):
         plan = context["awaiting_search"]["plan"]
         query = update["message"]["text"].strip()
