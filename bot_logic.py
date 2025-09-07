@@ -1,18 +1,35 @@
 from db import add_user, get_user_plan
 from football_api import get_leagues, get_national_teams, get_matches, search_teams, filter_by_letter
 import os
+import requests
 
 FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
 VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# --------------------------
+# Funzione invio messaggi
+# --------------------------
+def send_message(chat_id, text, reply_markup=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    requests.post(url, json=payload)
 
 # --------------------------
 # Menu principale e piani
 # --------------------------
-
 def start(update, context):
     user_id = update["message"]["from"]["id"]
     add_user(user_id)
-    return show_main_menu(update, context)
+    response = show_main_menu(update, context)
+    send_message(user_id, response["text"], response.get("reply_markup"))
+    return {"ok": True}
 
 def show_main_menu(update, context):
     keyboard = [
@@ -41,9 +58,8 @@ def show_plan_info(user_id, plan):
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
-# Selezione tipo: lettera o nome
+# Filtri e ricerca
 # --------------------------
-
 def show_search_choice(type_, plan):
     tipo_testo = "campionato" if type_ == "league" else "nazionale"
     keyboard = [
@@ -53,10 +69,6 @@ def show_search_choice(type_, plan):
         [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
     ]
     return {"text": f"🔍 Scegli come cercare il {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
-
-# --------------------------
-# Filtri alfabetici e ricerca
-# --------------------------
 
 def show_alphabet_keyboard(plan, type_):
     keyboard = [[{"text": c, "callback_data": f"filter_{type_}_{c}_{plan}"}] for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
@@ -76,10 +88,6 @@ def show_filtered_options(type_, letter, plan):
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     return {"text": f"🏟️ Seleziona {type_}:", "reply_markup": {"inline_keyboard": keyboard}}
 
-# --------------------------
-# Mostra partite
-# --------------------------
-
 def show_matches(league_id, plan):
     matches = get_matches(league_id)
     if not matches:
@@ -91,10 +99,6 @@ def show_matches(league_id, plan):
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     return {"text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
             "reply_markup": {"inline_keyboard": keyboard}}
-
-# --------------------------
-# Ricerca squadra
-# --------------------------
 
 def search_team_prompt(plan):
     return {"text": "🔎 Scrivi il nome della squadra che vuoi cercare:", "reply_markup": None}
