@@ -1,6 +1,5 @@
-from db import add_user, get_user_plan, add_ticket, get_user_tickets
+from db import add_user
 from football_api import get_leagues, get_national_teams, get_matches, search_teams
-from datetime import datetime
 import os
 
 FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
@@ -125,25 +124,3 @@ def show_search_results(query, plan, type_=None):
     keyboard = [[{"text": r["team"], "callback_data": f"team_{r['match_id']}_{plan}"}] for r in results]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     return {"text": f"🔍 Risultati per '{query}':", "reply_markup": {"inline_keyboard": keyboard}}
-
-# --------------------------
-# Funzioni pronostici
-# --------------------------
-
-def can_create_pronostic(user_id, plan):
-    tickets = get_user_tickets(user_id)
-    max_per_day = FREE_MAX_MATCHES if plan == "free" else VIP_MAX_MATCHES
-    today = datetime.utcnow().date()
-    today_tickets = [t for t in tickets if datetime.fromisoformat(t[2]).date() == today]
-    return len(today_tickets) < max_per_day
-
-def create_ticket(user_id, match_ids, plan):
-    if len(match_ids) > 5:
-        match_ids = match_ids[:5]
-
-    if not can_create_pronostic(user_id, plan):
-        return {"text": f"⚠️ Hai già creato {FREE_MAX_MATCHES if plan=='free' else VIP_MAX_MATCHES} pronostici oggi!"}
-
-    add_ticket(user_id, match_ids)
-    total_today = len([t for t in get_user_tickets(user_id) if datetime.fromisoformat(t[2]).date() == datetime.utcnow().date()])
-    return {"text": f"✅ Pronostico creato con {len(match_ids)} partite!\nPronostico numero {total_today} di oggi."}
