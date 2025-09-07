@@ -1,4 +1,4 @@
-from db import add_user, get_user_tickets
+from db import add_user, get_user_plan, add_ticket, get_user_tickets
 from football_api import get_leagues, get_national_teams, get_matches, search_teams
 from datetime import datetime
 import os
@@ -7,7 +7,7 @@ FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
 VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
 
 # --------------------------
-# Menu principale
+# Menu principale e piani
 # --------------------------
 
 def start(update, context):
@@ -36,27 +36,27 @@ def show_plan_info(update, context, plan):
     keyboard = [
         [{"text": "Campionati ⚽", "callback_data": f"select_type_league_{plan}"}],
         [{"text": "Nazionali 🌍", "callback_data": f"select_type_national_{plan}"}],
-        [{"text": "Cerca squadra 🔎", "callback_data": f"search_name_league_{plan}"}],
+        [{"text": "Cerca squadra 🔎", "callback_data": f"search_team_{plan}"}],
         [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
     ]
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
-# Menu campionato/nazionale
+# Selezione tipo: lettera o nome
 # --------------------------
 
 def show_search_choice(type_, plan):
     tipo_testo = "campionato" if type_ == "league" else "nazionale"
     keyboard = [
-        [{"text": "Cerca per lettera 🔤", "callback_data": f"search_letter_{type_}_{plan}"}],
-        [{"text": "Cerca nome 🔎", "callback_data": f"search_name_{type_}_{plan}"}],
+        [{"text": "Per lettera 🔤", "callback_data": f"search_letter_{type_}_{plan}"}],
+        [{"text": "Per nome 🔎", "callback_data": f"search_name_{type_}_{plan}"}],
         [{"text": "🔙 Indietro", "callback_data": "back"}],
         [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
     ]
     return {"text": f"🔍 Scegli come cercare il {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
-# Tastiere alfabetiche
+# Filtri alfabetici e ricerca
 # --------------------------
 
 def show_alphabet_keyboard(plan, type_):
@@ -79,32 +79,33 @@ def show_filtered_options(type_, letter, plan):
             "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}
         }
 
-    keyboard = []
-    for o in filtered:
-        if type_ == "league":
-            keyboard.append([{"text": o["display_name"], "callback_data": f"league_{o['league']['id']}_{plan}"}])
-        else:
-            keyboard.append([{"text": o["name"], "callback_data": f"national_{o['id']}_{plan}"}])
-    keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
-    keyboard.append([{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}])
+    if type_ == "league":
+        keyboard = [[{"text": o["display_name"], "callback_data": f"league_{o['league']['id']}_{plan}"}] for o in filtered]
+    else:
+        keyboard = [[{"text": o["name"], "callback_data": f"national_{o['id']}_{plan}"}] for o in filtered]
 
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     return {"text": f"🏟️ Seleziona {type_}:", "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
-# Funzioni partite
+# Mostra partite
 # --------------------------
 
 def show_matches(update, context, league_id, plan):
     matches = get_matches(league_id)
     if not matches:
-        return {"text": "⚽ Nessuna partita disponibile!", "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}}
+        return {
+            "text": "⚽ Nessuna partita disponibile per questa competizione!",
+            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}
+        }
 
-    keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}", 
-                  "callback_data": f"match_{m['fixture']['id']}"}] for m in matches]
+    keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}",
+                  "callback_data": f"match_{m['fixture']['id']}_{plan}"}] for m in matches]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
-    keyboard.append([{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}])
-
-    return {"text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:", "reply_markup": {"inline_keyboard": keyboard}}
+    return {
+        "text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
+        "reply_markup": {"inline_keyboard": keyboard}
+    }
 
 # --------------------------
 # Ricerca squadra
@@ -113,26 +114,14 @@ def show_matches(update, context, league_id, plan):
 def search_team_prompt(plan):
     return {"text": "🔎 Scrivi il nome della squadra che vuoi cercare:", "reply_markup": None}
 
-def show_search_results(query, plan, type_):
-    if type_ == "league":
-        results = search_teams(query, "league")
-    else:
-        results = search_teams(query, "national")
-
+def show_search_results(query, plan, type_=None):
+    results = search_teams(query, type_)
     if not results:
         return {
             "text": f"😕 Nessun risultato trovato per '{query}'.",
-            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}],
-                                                [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]]}
+            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}
         }
 
-    keyboard = []
-    for r in results:
-        if type_ == "league":
-            keyboard.append([{"text": r["team"], "callback_data": f"league_{r['match_id']}_{plan}"}])
-        else:
-            keyboard.append([{"text": r["team"], "callback_data": f"national_{r['match_id']}_{plan}"}])
+    keyboard = [[{"text": r["team"], "callback_data": f"team_{r['match_id']}_{plan}"}] for r in results]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
-    keyboard.append([{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}])
-
     return {"text": f"🔍 Risultati per '{query}':", "reply_markup": {"inline_keyboard": keyboard}}
