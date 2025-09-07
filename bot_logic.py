@@ -1,9 +1,7 @@
 from db import add_user, get_user_plan, add_ticket, get_user_tickets
 from football_api import get_leagues, get_national_teams, get_matches
 from datetime import datetime
-
-# Contesto per ricerca e paginazione {user_id: {"type": "league/national", "letter": "A", "plan": "free", "page": 0}}
-user_context = {}
+import string
 
 # --------------------------
 # Funzioni menu principale
@@ -35,57 +33,69 @@ def show_plan_info(update, context, plan):
     keyboard = [
         [{"text": "Scegli campionato ⚽", "callback_data": f"select_league_{plan}"}],
         [{"text": "Nazionali 🌍", "callback_data": f"select_national_{plan}"}],
+        [{"text": "🔍 Ricerca 🔎", "callback_data": f"search_{plan}"}],
         [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
     ]
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
+
 # --------------------------
-# Funzioni campionati e nazionali con paginazione
+# Funzioni campionati/nazionali paginati
 # --------------------------
 
 def paginate_items(items, page=0, per_page=10):
-    total = len(items)
-    pages = (total // per_page) + (1 if total % per_page else 0)
-    start = page * per_page
-    end = start + per_page
-    return items[start:end], pages
+    total_pages = (len(items) + per_page - 1) // per_page
+    page_items = items[page*per_page:(page+1)*per_page]
+    return page_items, total_pages
 
-def build_keyboard_with_pages(items, callback_prefix, page, plan, per_page=10):
-    paged_items, total_pages = paginate_items(items, page, per_page)
-    keyboard = [[{"text": i["display_name"], "callback_data": f"{callback_prefix}_{i['league']['id']}_{plan}"}] for i in paged_items]
-
-    nav_row = []
+def create_league_keyboard(leagues, page, total_pages, plan, prefix):
+    keyboard = [[{"text": l["display_name"], "callback_data": f"{prefix}_{l['league']['id']}_{plan}"}] for l in leagues]
+    
+    nav_buttons = []
     if page > 0:
-        nav_row.append({"text": "⬅️ Indietro", "callback_data": f"{callback_prefix}_page_{page-1}_{plan}"})
+        nav_buttons.append({"text": "⬅️ Indietro", "callback_data": f"{prefix}_page_{page-1}_{plan}"})
     if page < total_pages - 1:
-        nav_row.append({"text": "➡️ Avanti", "callback_data": f"{callback_prefix}_page_{page+1}_{plan}"})
-    if nav_row:
-        keyboard.append(nav_row)
-
+        nav_buttons.append({"text": "➡️ Avanti", "callback_data": f"{prefix}_page_{page+1}_{plan}"})
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
     return keyboard
 
 def show_leagues(update, context, plan, page=0):
     leagues = get_leagues()
     if not leagues:
-        return {
-            "text": "😕 Al momento non ci sono campionati disponibili.\nForse le squadre stanno facendo il riscaldamento... riprova più tardi!",
-            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}
-        }
-    keyboard = build_keyboard_with_pages(leagues, "league", page, plan)
-    return {"text": "🏟️ Seleziona un campionato e costruisci il tuo pronostico (max 5 partite):",
-            "reply_markup": {"inline_keyboard": keyboard}}
+        return {"text": "😕 Nessun campionato disponibile.", "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}}
+
+    page_items, total_pages = paginate_items(leagues, page)
+    keyboard = create_league_keyboard(page_items, page, total_pages, plan, "league")
+    return {"text": "🏟️ Seleziona un campionato (max 5 partite):", "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_nationals(update, context, plan, page=0):
-    nationals = get_national_teams()
-    if not nationals:
-        return {
-            "text": "🌍 Nessuna nazionale in campo al momento!\nLe squadre staranno cantando l'inno... riprova più tardi!",
-            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}
-        }
-    keyboard = build_keyboard_with_pages(nationals, "national", page, plan)
-    return {"text": "🌍 Seleziona una nazionale e crea il tuo pronostico (max 5 partite):",
-            "reply_markup": {"inline_keyboard": keyboard}}
+    leagues = get_national_teams()
+    if not leagues:
+        return {"text": "🌍 Nessuna nazionale disponibile.", "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}}
+
+    page_items, total_pages = paginate_items(leagues, page)
+    keyboard = create_league_keyboard(page_items, page, total_pages, plan, "national")
+    return {"text": "🌍 Seleziona una nazionale (max 5 partite):", "reply_markup": {"inline_keyboard": keyboard}}
+
+
+# --------------------------
+# Funzione ricerca
+# --------------------------
+
+def search_leagues(update, context, plan, query):
+    all_leagues = get_leagues() + get_national_teams()
+    results = [l for l in all_leagues if query.lower() in l["display_name"].lower()]
+
+    if not results:
+        return {"text": f"😕 Nessuna squadra o campionato trovato per '{query}'!", "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}}
+
+    keyboard = [[{"text": l["display_name"], "callback_data": f"search_result_{l['league']['id']}_{plan}"}] for l in results[:20]]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
+    return {"text": f"🔎 Risultati per '{query}':", "reply_markup": {"inline_keyboard": keyboard}}
+
 
 # --------------------------
 # Funzioni partite
@@ -94,15 +104,12 @@ def show_nationals(update, context, plan, page=0):
 def show_matches(update, context, league_id, plan):
     matches = get_matches(league_id)
     if not matches:
-        return {
-            "text": "⚽ Nessuna partita disponibile per questa competizione!\nI giocatori forse sono negli spogliatoi... riprova più tardi!",
-            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}]]}
-        }
-    keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}", 
-                  "callback_data": f"match_{m['fixture']['id']}"}] for m in matches[:20]]
+        return {"text": "⚽ Nessuna partita disponibile.", "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}]]}}
+
+    keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}", "callback_data": f"match_{m['fixture']['id']}"}] for m in matches[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}])
-    return {"text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
-            "reply_markup": {"inline_keyboard": keyboard}}
+    return {"text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:", "reply_markup": {"inline_keyboard": keyboard}}
+
 
 # --------------------------
 # Funzioni pronostici
