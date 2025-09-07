@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 def main_menu():
-    kb = InlineKeyboardMarkup()
+    kb = InlineKeyboardMarkup(row_width=2)
     kb.add(InlineKeyboardButton("⚽ Free", callback_data="plan_free"))
     kb.add(InlineKeyboardButton("💸 Pack 2€", callback_data="plan_2eur"))
     kb.add(InlineKeyboardButton("🏆 VIP", callback_data="plan_vip"))
@@ -9,7 +9,7 @@ def main_menu():
     return kb
 
 def back_home():
-    kb = InlineKeyboardMarkup()
+    kb = InlineKeyboardMarkup(row_width=2)
     kb.add(InlineKeyboardButton("⬅️ Indietro", callback_data="back"))
     kb.add(InlineKeyboardButton("🏠 Home", callback_data="home"))
     return kb
