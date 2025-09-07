@@ -2,7 +2,7 @@ import os
 import httpx
 from fastapi import FastAPI, Request
 from db import init_db, delete_old_tickets
-from bot_logic import start, show_main_menu, show_plan_info, show_leagues, show_nationals, show_matches, create_ticket
+from bot_logic import start, show_main_menu, show_plan_info, show_alphabet_keyboard, show_filtered_options, show_matches
 from stripe_webhook import handle_stripe_event
 
 # Inizializza DB e pulizia schedine vecchie
@@ -63,13 +63,17 @@ async def telegram_webhook(req: Request):
             plan = cb_data.split("_")[1]
             response = show_plan_info(data, None, plan)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
-        elif cb_data.startswith("select_league_"):
+        elif cb_data.startswith("select_league_") or cb_data.startswith("select_national_"):
             plan = cb_data.split("_")[-1]
-            response = show_leagues(data, None, plan)
+            type_ = "league" if cb_data.startswith("select_league_") else "national"
+            response = show_alphabet_keyboard(plan, type_)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
-        elif cb_data.startswith("select_national_"):
-            plan = cb_data.split("_")[-1]
-            response = show_nationals(data, None, plan)
+        elif cb_data.startswith("filter_"):
+            parts = cb_data.split("_")
+            type_ = parts[1]
+            letter = parts[2]
+            plan = parts[3]
+            response = show_filtered_options(type_, letter, plan)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
         elif cb_data.startswith("league_") or cb_data.startswith("national_"):
             parts = cb_data.split("_")
