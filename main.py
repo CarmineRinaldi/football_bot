@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from mine import start, show_main_menu, show_plan_info, handle_back, show_search_choice, show_alphabet_keyboard, show_filtered_options, show_matches, search_team_prompt, show_search_results
+from mine import start, handle_back, show_plan_info, show_search_choice, show_alphabet_keyboard, show_filtered_options, show_matches, search_team_prompt, show_search_results
 from stripe_webhook import handle_stripe_event
 import uvicorn
 
@@ -12,58 +11,66 @@ app = FastAPI()
 @app.post("/webhook")
 async def telegram_webhook(update: Request):
     data = await update.json()
-    context = {}
-    try:
-        # Messaggio normale
-        if "message" in data:
-            res = start(data, context)
-            return JSONResponse(res)
+    user_id = None
 
-        # Callback inline
-        elif "callback_query" in data:
-            cb_data = data["callback_query"]["data"]
+    # Gestione messaggi
+    if "message" in data:
+        user_id = data["message"]["from"]["id"]
+        return start(data, {})
 
-            # Gestione tasto "back"
-            if cb_data == "back":
-                res = handle_back(data, context, context.get("last_state"))
-                return JSONResponse(res)
+    # Gestione callback button
+    elif "callback_query" in data:
+        cb = data["callback_query"]
+        user_id = cb["from"]["id"]
+        cb_data = cb["data"]
 
-            # Piani
-            elif cb_data.startswith("plan_"):
-                plan = cb_data.replace("plan_", "")
-                res = show_plan_info(data, context, plan)
-                context["current_plan"] = plan
-                context["last_state"] = "plan_info"
-                return JSONResponse(res)
+        # Ritorna al menu principale
+        if cb_data == "main_menu":
+            return start({"message": {"from": {"id": user_id}}}, {})
 
-            # Scelta ricerca
-            elif cb_data.startswith("search_letter_") or cb_data.startswith("search_name_"):
-                parts = cb_data.split("_")
-                type_ = parts[2]
-                plan = parts[3]
-                res = show_search_choice(type_, plan)
-                return JSONResponse(res)
+        # Tasti di ritorno
+        elif cb_data == "back":
+            return handle_back(user_id, last_state=None)  # puoi gestire last_state con context se vuoi
 
-            # Filtri alfabetici
-            elif cb_data.startswith("filter_"):
-                parts = cb_data.split("_")
-                type_ = parts[1]
-                letter = parts[2]
-                plan = parts[3]
-                res = show_filtered_options(type_, letter, plan)
-                return JSONResponse(res)
+        # Scelta piano
+        elif cb_data.startswith("plan_"):
+            plan = cb_data.split("_")[1]
+            return show_plan_info(user_id, plan)
 
-            # Selezione partite
-            elif cb_data.startswith("select_") or cb_data.startswith("match_"):
-                # qui puoi aggiungere logica per selezionare partite e registrarle
-                return JSONResponse({"text": f"Selezione: {cb_data}"})
+        # Selezione tipo campionato/nazionale
+        elif cb_data.startswith("select_type_"):
+            parts = cb_data.split("_")
+            type_ = parts[2]  # league o national
+            plan = parts[3]
+            return show_search_choice(user_id, type_, plan)
 
-            return JSONResponse({"text": f"Callback ricevuto: {cb_data}"})
+        # Filtri alfabetici
+        elif cb_data.startswith("search_letter_"):
+            parts = cb_data.split("_")
+            type_ = parts[2]
+            plan = parts[3]
+            return show_alphabet_keyboard(user_id, plan, type_)
 
-        return JSONResponse({"text": "Aggiornamento non gestito"})
-    
-    except Exception as e:
-        return JSONResponse({"error": str(e)})
+        elif cb_data.startswith("filter_"):
+            parts = cb_data.split("_")
+            type_ = parts[1]
+            letter = parts[2]
+            plan = parts[3]
+            return show_filtered_options(user_id, type_, letter, plan)
+
+        # Partite
+        elif cb_data.startswith("league_") or cb_data.startswith("national_"):
+            parts = cb_data.split("_")
+            league_id = parts[1]
+            plan = parts[2]
+            return show_matches(user_id, league_id, plan)
+
+        # Ricerca squadra
+        elif cb_data.startswith("search_team_"):
+            plan = cb_data.split("_")[2]
+            return search_team_prompt(user_id, plan)
+
+    return {"status": "ignored"}
 
 # --------------------------
 # Stripe Webhook
