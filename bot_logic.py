@@ -3,12 +3,17 @@ import requests
 from db import add_user, get_user_plan
 from football_api import get_leagues, get_national_teams, get_matches, search_teams, filter_by_letter
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# --------------------------
+# Configurazione BOT
+# --------------------------
+BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("Errore: TG_BOT_TOKEN non impostato nel file .env")
+
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
 VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
-
 
 # --------------------------
 # Funzione generica invio messaggi
@@ -23,7 +28,6 @@ def send_message(chat_id, text, keyboard=None):
     except Exception as e:
         print("Errore invio messaggio:", e)
 
-
 # --------------------------
 # Start e menu principale
 # --------------------------
@@ -32,7 +36,6 @@ def start(update, context):
     user_id = update["message"]["from"]["id"]
     add_user(user_id)
     show_main_menu(chat_id)
-
 
 def show_main_menu(chat_id):
     keyboard = [
@@ -43,7 +46,6 @@ def show_main_menu(chat_id):
     ]
     message = "⚽ Benvenuto nel tuo stadio personale!\nScegli un piano o controlla le tue schedine:"
     send_message(chat_id, message, keyboard)
-
 
 def show_plan_info(chat_id, plan):
     if plan == "free":
@@ -61,7 +63,6 @@ def show_plan_info(chat_id, plan):
     ]
     send_message(chat_id, text, keyboard)
 
-
 # --------------------------
 # Scelta tipo ricerca
 # --------------------------
@@ -75,7 +76,6 @@ def show_search_choice(chat_id, type_, plan):
     ]
     send_message(chat_id, f"🔍 Scegli come cercare il {tipo_testo}:", keyboard)
 
-
 # --------------------------
 # Filtri alfabetici
 # --------------------------
@@ -84,7 +84,6 @@ def show_alphabet_keyboard(chat_id, plan, type_):
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     tipo_testo = "campionato" if type_ == "league" else "nazionale"
     send_message(chat_id, f"🔤 Filtra per lettera iniziale del {tipo_testo}:", keyboard)
-
 
 def show_filtered_options(chat_id, type_, letter, plan):
     items = get_leagues() if type_ == "league" else get_national_teams()
@@ -98,7 +97,6 @@ def show_filtered_options(chat_id, type_, letter, plan):
     keyboard = [[{"text": o["display_name"], "callback_data": f"{type_}_{o['league']['id']}_{plan}"}] for o in filtered]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     send_message(chat_id, f"🏟️ Seleziona {type_}:", keyboard)
-
 
 # --------------------------
 # Mostra partite
@@ -115,13 +113,11 @@ def show_matches(chat_id, league_id, plan):
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     send_message(chat_id, "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:", keyboard)
 
-
 # --------------------------
 # Ricerca squadra
 # --------------------------
 def search_team_prompt(chat_id, plan):
     send_message(chat_id, "🔎 Scrivi il nome della squadra che vuoi cercare:")
-
 
 def show_search_results(chat_id, query, plan, type_=None):
     results = search_teams(query, type_)
