@@ -1,5 +1,5 @@
 from db import add_user, get_user_plan, add_ticket, get_user_tickets
-from football_api import get_leagues, get_national_teams
+from football_api import get_leagues, get_national_teams, get_matches
 from datetime import datetime
 
 # --------------------------
@@ -42,25 +42,55 @@ def show_plan_info(update, context, plan):
 
 def show_leagues(update, context, plan):
     leagues = get_leagues()
+
+    if not leagues:
+        return {
+            "text": "😕 Al momento non ci sono campionati disponibili.\n"
+                    "Forse le squadre stanno facendo il riscaldamento... riprova più tardi!",
+            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}
+        }
+
     keyboard = [[{"text": l["league"]["name"], "callback_data": f"league_{l['league']['id']}_{plan}"}] for l in leagues[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    return {"text": "🏟️ Seleziona un campionato e costruisci il tuo pronostico (max 5 partite):", 
-            "reply_markup": {"inline_keyboard": keyboard}}
+    return {
+        "text": "🏟️ Seleziona un campionato e costruisci il tuo pronostico (max 5 partite):", 
+        "reply_markup": {"inline_keyboard": keyboard}
+    }
 
 def show_nationals(update, context, plan):
     leagues = get_national_teams()
+
+    if not leagues:
+        return {
+            "text": "🌍 Nessuna nazionale in campo al momento!\n"
+                    "Le squadre staranno cantando l'inno... riprova più tardi!",
+            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}
+        }
+
     keyboard = [[{"text": l["league"]["name"], "callback_data": f"national_{l['league']['id']}_{plan}"}] for l in leagues[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
-    return {"text": "🌍 Seleziona una nazionale e crea il tuo pronostico (max 5 partite):",
-            "reply_markup": {"inline_keyboard": keyboard}}
+    return {
+        "text": "🌍 Seleziona una nazionale e crea il tuo pronostico (max 5 partite):",
+        "reply_markup": {"inline_keyboard": keyboard}
+    }
 
 def show_matches(update, context, league_id, plan):
-    matches = get_leagues() if str(league_id).startswith("N") else get_matches(league_id)
-    keyboard = [[{"text": f"{m['fixture']['home']['name']} vs {m['fixture']['away']['name']}", 
+    matches = get_matches(league_id)
+
+    if not matches:
+        return {
+            "text": "⚽ Nessuna partita disponibile per questa competizione!\n"
+                    "I giocatori forse sono negli spogliatoi... riprova più tardi!",
+            "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}]]}
+        }
+
+    keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}", 
                   "callback_data": f"match_{m['fixture']['id']}"}] for m in matches[:20]]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"select_league_{plan}"}])
-    return {"text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
-            "reply_markup": {"inline_keyboard": keyboard}}
+    return {
+        "text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
+        "reply_markup": {"inline_keyboard": keyboard}
+    }
 
 # --------------------------
 # Funzioni pronostici
