@@ -1,131 +1,103 @@
-# football_api.py — versione aggiornata
 import os
-import requests
-from datetime import datetime
+import httpx
+from fastapi import FastAPI, Request
+from db import init_db, delete_old_tickets
+from bot_logic import start, show_main_menu, show_plan_info, show_leagues, show_nationals, show_matches
+from stripe_webhook import handle_stripe_event
 
-API_KEY = os.getenv("API_FOOTBALL_KEY")
-BASE_URL = "https://v3.football.api-sports.io"
-# includiamo entrambi i nomi di header per compatibilità
-HEADERS = {"x-apisports-key": API_KEY, "X-Auth-Token": API_KEY}
+# Inizializza DB e pulizia schedine vecchie
+init_db()
+delete_old_tickets()
 
-def _fetch_leagues_raw():
-    """Chiamata centrale per prendere /leagues e gestire errori."""
+app = FastAPI()
+
+TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
+BASE_URL = f"https://api.telegram.org/bot{TG_BOT_TOKEN}"
+
+async def send_message(chat_id, text, reply_markup=None):
     try:
-        res = requests.get(f"{BASE_URL}/leagues", headers=HEADERS, timeout=10)
-        res.raise_for_status()
-        return res.json().get("response", [])
-    except Exception as e:
-        print("Errore fetch leagues:", e)
-        return []
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            await client.post(f"{BASE_URL}/sendMessage", json={
+                "chat_id": chat_id,
+                "text": text,
+                "reply_markup": reply_markup
+            })
+    except httpx.RequestError as e:
+        print(f"Errore invio messaggio: {e}")
 
-def get_leagues():
-    """
-    Restituisce una lista di leghe 'di club' deduplicate e con display_name.
-    Non filtra eccessivamente sul tipo per evitare liste vuote.
-    """
-    data = _fetch_leagues_raw()
-    seen_ids = set()
-    seen_name_country = set()
-    leagues = []
-
-    for l in data:
-        league = l.get("league", {})
-        country = l.get("country", {})
-        lid = league.get("id")
-        name = league.get("name", "")
-        country_name = country.get("name") or country.get("code") or ""
-
-        # deduplicate per id o per (nome, paese)
-        key_name_country = (name.strip().lower(), country_name.strip().lower())
-        if lid in seen_ids or key_name_country in seen_name_country:
-            continue
-
-        seen_ids.add(lid)
-        seen_name_country.add(key_name_country)
-
-        # aggiungiamo un display_name utile per i bottoni (es. "Serie A (Italy)")
-        l["display_name"] = f"{name} ({country_name})" if country_name else name
-
-        # opzionale: preferiamo leghe con seasons non vuote (ma non le escludiamo rigidamente)
-        seasons = l.get("seasons", [])
-        if seasons:
-            leagues.append(l)
-        else:
-            # aggiungiamo comunque come fallback
-            leagues.append(l)
-
-    # ordiniamo per paese/ nome per avere ordine consistente
-    leagues.sort(key=lambda x: (x.get("country", {}).get("name") or "", x.get("league", {}).get("name") or ""))
-    return leagues
-
-def get_national_teams():
-    """
-    Restituisce competizioni nazionali / coppe deduplicate.
-    """
-    data = _fetch_leagues_raw()
-    seen_ids = set()
-    seen_name_country = set()
-    national_leagues = []
-
-    for l in data:
-        league = l.get("league", {})
-        country = l.get("country", {})
-        lid = league.get("id")
-        name = league.get("name", "")
-        typ = (league.get("type") or "").lower()
-        country_name = country.get("name") or country.get("code") or ""
-        key_name_country = (name.strip().lower(), country_name.strip().lower())
-
-        # prendiamo se sembra una competizione nazionale/cup o comunque ha country
-        if not (typ in ["national", "cup"] or country_name):
-            # lasciare un po' largo il filtro per non perdere dati utili
-            pass
-
-        if lid in seen_ids or key_name_country in seen_name_country:
-            continue
-
-        seen_ids.add(lid)
-        seen_name_country.add(key_name_country)
-
-        l["display_name"] = f"{name} ({country_name})" if country_name else name
-        national_leagues.append(l)
-
-    national_leagues.sort(key=lambda x: (x.get("country", {}).get("name") or "", x.get("league", {}).get("name") or ""))
-    return national_leagues
-
-def get_matches(league_id):
-    """
-    Prova a recuperare le fixtures per una lega:
-    1) senza season (più generico),
-    2) fallback su anno corrente / anno precedente / anno successivo.
-    Ritorna lista di match (puoi filtrare date/partite future lato caller).
-    """
+async def delete_message(chat_id, message_id):
     try:
-        # 1) prova senza season
-        url = f"{BASE_URL}/fixtures?league={league_id}"
-        res = requests.get(url, headers=HEADERS, timeout=10)
-        # debug rapido
-        print(f"GET {url} -> {res.status_code}")
-        res.raise_for_status()
-        data = res.json().get("response", [])
-        if data:
-            print(f"Found {len(data)} matches for league {league_id} (no season filter).")
-            return data
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            await client.post(f"{BASE_URL}/deleteMessage", json={
+                "chat_id": chat_id,
+                "message_id": message_id
+            })
+    except httpx.RequestError as e:
+        print(f"Errore delete message: {e}")
 
-        # 2) fallback su anni vicini
-        year = datetime.utcnow().year
-        for s in (year, year-1, year+1):
-            url_s = f"{BASE_URL}/fixtures?league={league_id}&season={s}"
-            res = requests.get(url_s, headers=HEADERS, timeout=10)
-            print(f"GET {url_s} -> {res.status_code}")
-            res.raise_for_status()
-            data = res.json().get("response", [])
-            if data:
-                print(f"Found {len(data)} matches for league {league_id} season {s}.")
-                return data
+@app.get("/")
+async def root():
+    return {"status": "Bot online!"}
 
-        print(f"No matches found for league {league_id} after all fallbacks.")
-        return []
+@app.post("/webhook")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    print("Webhook ricevuto:", data)
+
+    try:
+        if "message" in data:
+            chat_id = data["message"]["chat"]["id"]
+            message_id = data["message"]["message_id"]
+            text = data["message"].get("text")
+
+            if text == "/start":
+                await delete_message(chat_id, message_id)
+                response = start(data, None)
+                await send_message(chat_id, response["text"], response.get("reply_markup"))
+
+        if "callback_query" in data:
+            cb = data["callback_query"]
+            chat_id = cb["message"]["chat"]["id"]
+            message_id = cb["message"]["message_id"]
+            cb_data = cb["data"]
+            await delete_message(chat_id, message_id)
+
+            if cb_data == "main_menu":
+                response = show_main_menu(data, None)
+                await send_message(chat_id, response["text"], response.get("reply_markup"))
+
+            elif cb_data in ["plan_free", "plan_2eur", "plan_vip"]:
+                plan = cb_data.split("_")[1]
+                response = show_plan_info(data, None, plan)
+                await send_message(chat_id, response["text"], response.get("reply_markup"))
+
+            elif cb_data.startswith("select_league_"):
+                plan = cb_data.split("_")[-1]
+                response = show_leagues(data, None, plan)
+                await send_message(chat_id, response["text"], response.get("reply_markup"))
+
+            elif cb_data.startswith("select_national_"):
+                plan = cb_data.split("_")[-1]
+                response = show_nationals(data, None, plan)
+                await send_message(chat_id, response["text"], response.get("reply_markup"))
+
+            elif cb_data.startswith("league_") or cb_data.startswith("national_"):
+                parts = cb_data.split("_")
+                if len(parts) >= 3 and parts[1].isdigit():
+                    league_id = int(parts[1])
+                    plan = parts[2]
+                    response = show_matches(data, None, league_id, plan)
+                    await send_message(chat_id, response["text"], response.get("reply_markup"))
+                else:
+                    print(f"Callback non gestita correttamente: {cb_data}")
+
     except Exception as e:
-        print(f"Errore get_matches per lega {league_id}: {e}")
-        return []
+        print(f"Errore gestione webhook: {e}")
+
+    return {"status": 200}
+
+@app.post("/stripe_webhook")
+async def stripe_webhook(req: Request):
+    payload = await req.body()
+    sig_header = req.headers.get("stripe-signature")
+    return handle_stripe_event(payload, sig_header)
