@@ -5,7 +5,7 @@ from db import init_db, delete_old_tickets
 from bot_logic import (
     start, show_main_menu, show_plan_info,
     show_alphabet_keyboard, show_filtered_options,
-    show_matches, search_team_prompt, show_search_results
+    show_matches, search_team_prompt, show_search_results, show_search_choice
 )
 from stripe_webhook import handle_stripe_event
 
@@ -65,16 +65,16 @@ async def telegram_webhook(req: Request):
     chat_id = None
     plan = "free"
 
-    # Messaggi di testo
     if "message" in data:
         chat_id = data["message"]["chat"]["id"]
         message_id = data["message"]["message_id"]
         text = data["message"].get("text")
 
-        # Modalità ricerca squadra/campionati/nazionali per nome
-        if user_search_mode.get(chat_id):
+        # Modalità ricerca squadra
+        if chat_id in user_search_mode:
+            type_ = user_search_mode[chat_id]["type"]
+            plan = user_search_mode[chat_id]["plan"]
             query = text.strip()
-            type_, plan = user_search_mode[chat_id]
             await delete_message(chat_id, message_id)
             response = show_search_results(query, plan, type_)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
@@ -82,7 +82,6 @@ async def telegram_webhook(req: Request):
             user_menu_stack.pop(chat_id, None)
             return {"status": 200}
 
-        # /start
         if text == "/start":
             await delete_message(chat_id, message_id)
             response = start(data, None)
@@ -90,23 +89,22 @@ async def telegram_webhook(req: Request):
             user_menu_stack[chat_id] = [("main_menu", None)]
             return {"status": 200}
 
-    # Callback dai pulsanti
     if "callback_query" in data:
         cb = data["callback_query"]
         chat_id = cb["message"]["chat"]["id"]
         message_id = cb["message"]["message_id"]
         cb_data = cb["data"]
 
-        # Cancella messaggio precedente e mostra attesa
+        # Cancella messaggio precedente
         await delete_message(chat_id, message_id)
-        waiting_msg_id = await send_waiting_message(chat_id)
+        await send_waiting_message(chat_id)
 
         # Menu principale
         if cb_data == "main_menu":
             response = show_main_menu(data, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id] = [("main_menu", None)]
-
+        
         # Piani
         elif cb_data.startswith("plan_"):
             plan = cb_data.split("_")[1]
@@ -115,37 +113,12 @@ async def telegram_webhook(req: Request):
             user_menu_stack[chat_id] = [("plan_info", plan)]
 
         # Selezione campionato/nazionale
-        elif cb_data.startswith("select_league_"):
-            plan = cb_data.split("_")[-1]
-            response = {
-                "text": "🔍 Filtra campionati per lettera o cerca per nome:",
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [{"text": "Per lettera", "callback_data": f"search_letter_league_{plan}"}],
-                        [{"text": "Per nome", "callback_data": f"search_name_league_{plan}"}],
-                        [{"text": "🔙 Indietro", "callback_data": "back"}],
-                        [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
-                    ]
-                }
-            }
+        elif cb_data.startswith("select_type_"):
+            type_ = cb_data.split("_")[2]
+            plan = cb_data.split("_")[3]
+            response = show_search_choice(type_, plan)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("select_type", ("league", plan)))
-
-        elif cb_data.startswith("select_national_"):
-            plan = cb_data.split("_")[-1]
-            response = {
-                "text": "🔍 Filtra nazionali per lettera o cerca per nome:",
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [{"text": "Per lettera", "callback_data": f"search_letter_national_{plan}"}],
-                        [{"text": "Per nome", "callback_data": f"search_name_national_{plan}"}],
-                        [{"text": "🔙 Indietro", "callback_data": "back"}],
-                        [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
-                    ]
-                }
-            }
-            await send_message(chat_id, response["text"], response.get("reply_markup"))
-            user_menu_stack[chat_id].append(("select_type", ("national", plan)))
+            user_menu_stack[chat_id].append(("select_type", (type_, plan)))
 
         # Ricerca lettere
         elif cb_data.startswith("search_letter_"):
@@ -158,10 +131,9 @@ async def telegram_webhook(req: Request):
 
         # Ricerca nome
         elif cb_data.startswith("search_name_"):
-            parts = cb_data.split("_")
-            type_ = parts[2]
-            plan = parts[3]
-            user_search_mode[chat_id] = (type_, plan)
+            type_ = cb_data.split("_")[2]
+            plan = cb_data.split("_")[3]
+            user_search_mode[chat_id] = {"type": type_, "plan": plan}
             response = search_team_prompt(plan)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("search_team", (type_, plan)))
@@ -207,17 +179,7 @@ async def telegram_webhook(req: Request):
                     response = search_team_prompt(plan)
                 elif kind == "select_type":
                     type_, plan = param
-                    response = {
-                        "text": f"🔍 Filtra {type_} per lettera o cerca per nome:",
-                        "reply_markup": {
-                            "inline_keyboard": [
-                                [{"text": "Per lettera", "callback_data": f"search_letter_{type_}_{plan}"}],
-                                [{"text": "Per nome", "callback_data": f"search_name_{type_}_{plan}"}],
-                                [{"text": "🔙 Indietro", "callback_data": "back"}],
-                                [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
-                            ]
-                        }
-                    }
+                    response = show_search_choice(type_, plan)
                 elif kind == "main_menu":
                     response = show_main_menu(data, None)
                 await send_message(chat_id, response["text"], response.get("reply_markup"))
