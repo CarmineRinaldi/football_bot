@@ -1,7 +1,8 @@
 import os
 import asyncio
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.enums import ParseMode  # <-- import corretto per v3
 from handlers import start, plans, search
 from utils.db import init_db
 
@@ -10,7 +11,7 @@ init_db()
 
 BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 
-bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)  # <-- usa ParseMode da aiogram.enums
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
