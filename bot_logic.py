@@ -1,5 +1,5 @@
 from db import add_user, get_user_plan, add_ticket, get_user_tickets
-from football_api import get_leagues, get_national_teams, get_matches
+from football_api import get_leagues, get_national_teams, get_matches, search_teams
 from datetime import datetime
 import os
 
@@ -36,7 +36,7 @@ def show_plan_info(update, context, plan):
     keyboard = [
         [{"text": "Scegli campionato ⚽", "callback_data": f"select_league_{plan}"}],
         [{"text": "Nazionali 🌍", "callback_data": f"select_national_{plan}"}],
-        [{"text": "Cerca squadra 🔎", "callback_data": f"search_team_{plan}"}],  # Nuovo tasto
+        [{"text": "Cerca squadra 🔎", "callback_data": f"search_team_{plan}"}],
         [{"text": "🔙 Indietro", "callback_data": "main_menu"}]
     ]
     return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
@@ -46,14 +46,12 @@ def show_plan_info(update, context, plan):
 # --------------------------
 
 def show_alphabet_keyboard(plan, type_):
-    """Mostra tastiera A-Z per filtrare campionati o nazionali."""
     keyboard = [[{"text": c, "callback_data": f"filter_{type_}_{c}_{plan}"}] for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
     tipo_testo = "campionato" if type_ == "league" else "nazionale"
     return {"text": f"🔍 Seleziona la lettera iniziale del {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
 
 def show_filtered_options(type_, letter, plan):
-    """Filtra campionati o nazionali in base alla lettera selezionata."""
     options = get_leagues() if type_ == "league" else get_national_teams()
     filtered = [o for o in options if o["league"]["name"].upper().startswith(letter.upper())]
 
@@ -86,6 +84,24 @@ def show_matches(update, context, league_id, plan):
         "text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
         "reply_markup": {"inline_keyboard": keyboard}
     }
+
+# --------------------------
+# Ricerca squadra
+# --------------------------
+
+def search_team_prompt(plan):
+    """Chiede all’utente di scrivere il nome della squadra."""
+    return {"text": "🔎 Scrivi il nome della squadra che vuoi cercare:", "reply_markup": None}
+
+def show_search_results(query, plan):
+    results = search_teams(query)
+    if not results:
+        return {"text": f"😕 Nessun risultato trovato per '{query}'.",
+                "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}]]}}
+
+    keyboard = [[{"text": r["team"], "callback_data": f"team_{r['match_id']}_{plan}"}] for r in results]
+    keyboard.append([{"text": "🔙 Indietro", "callback_data": f"plan_{plan}"}])
+    return {"text": f"🔍 Risultati per '{query}':", "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
 # Funzioni pronostici
