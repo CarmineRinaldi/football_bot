@@ -1,4 +1,5 @@
-from aiogram import types, Dispatcher
+from aiogram import types, Router
+from aiogram.filters import Command
 from .buttons import main_menu
 
 WELCOME_TEXT = (
@@ -12,10 +13,13 @@ WELCOME_TEXT = (
     "🏟️ Usa i pulsanti qui sotto per iniziare la partita!"
 )
 
+router = Router()
+
+@router.message(Command("start"))
 async def cmd_start(message: types.Message) -> None:
     """Handler per il comando /start"""
     await message.answer(WELCOME_TEXT, reply_markup=main_menu())
 
-def register_handlers(dp: Dispatcher) -> None:
+def register_handlers(dp):
     """Registra tutti gli handler di questo modulo"""
-    dp.message.register(cmd_start, commands=["start"])
+    dp.include_router(router)
