@@ -55,6 +55,8 @@ def get_user_plan(user_id):
 # --------------------------
 def add_ticket(user_id, matches):
     """Aggiunge una schedina per l'utente."""
+    if not matches:
+        return
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute(
@@ -68,7 +70,7 @@ def get_user_tickets(user_id):
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute(
-            "SELECT id, matches, created_at FROM tickets WHERE user_id=?",
+            "SELECT id, matches, created_at FROM tickets WHERE user_id=? ORDER BY created_at DESC",
             (user_id,)
         )
         tickets = c.fetchall()
