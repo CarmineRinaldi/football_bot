@@ -3,9 +3,15 @@ import httpx
 from fastapi import FastAPI, Request
 from db import init_db, delete_old_tickets
 from bot_logic import (
-    start, show_main_menu, show_plan_info,
-    show_alphabet_keyboard, show_filtered_options,
-    show_matches, search_team_prompt, show_search_results
+    start,
+    show_main_menu,
+    show_plan_info,
+    show_search_choice,
+    show_alphabet_keyboard,
+    show_filtered_options,
+    show_matches,
+    search_team_prompt,
+    show_search_results
 )
 from stripe_webhook import handle_stripe_event
 
@@ -20,8 +26,10 @@ app = FastAPI()
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 BASE_URL = f"https://api.telegram.org/bot{TG_BOT_TOKEN}"
 
-user_search_mode = {}      # utente in modalità ricerca
-user_menu_stack = {}       # stack menu per "indietro"
+# Per memorizzare utenti in modalità "ricerca squadra"
+user_search_mode = {}
+# Per tracciare stack menu per "indietro"
+user_menu_stack = {}
 
 # --------------------------
 # Funzioni Telegram
@@ -58,6 +66,7 @@ async def root():
 @app.post("/webhook")
 async def telegram_webhook(req: Request):
     data = await req.json()
+    print("Webhook ricevuto:", data)
 
     chat_id = None
     plan = "free"
@@ -90,6 +99,7 @@ async def telegram_webhook(req: Request):
         message_id = cb["message"]["message_id"]
         cb_data = cb["data"]
 
+        # Cancella messaggio precedente
         await delete_message(chat_id, message_id)
         waiting_msg_id = await send_waiting_message(chat_id)
 
@@ -98,7 +108,7 @@ async def telegram_webhook(req: Request):
             response = show_main_menu(data, None)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id] = [("main_menu", None)]
-
+        
         # Piani
         elif cb_data.startswith("plan_"):
             plan = cb_data.split("_")[1]
@@ -106,10 +116,11 @@ async def telegram_webhook(req: Request):
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id] = [("plan_info", plan)]
 
-        # Selezione tipo
+        # Selezione campionato/nazionale
         elif cb_data.startswith("select_type_"):
-            type_ = cb_data.split("_")[2]
-            plan = cb_data.split("_")[3]
+            parts = cb_data.split("_")
+            type_ = parts[2]  # league o national
+            plan = parts[3]
             response = show_search_choice(type_, plan)
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("select_type", (type_, plan)))
@@ -123,7 +134,7 @@ async def telegram_webhook(req: Request):
             await send_message(chat_id, response["text"], response.get("reply_markup"))
             user_menu_stack[chat_id].append(("alphabet", (type_, plan)))
 
-        # Ricerca nome squadra
+        # Ricerca nome
         elif cb_data.startswith("search_name_"):
             type_ = cb_data.split("_")[2]
             plan = cb_data.split("_")[3]
