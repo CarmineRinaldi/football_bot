@@ -9,6 +9,8 @@ from bot_logic import (
 )
 from db import init_db
 import uvicorn
+import os
+import requests
 
 app = FastAPI()
 
@@ -75,9 +77,32 @@ async def telegram_webhook(update: Request):
 
     return JSONResponse(content={"ok": True})
 
+
+# --------------------------
+# Root
+# --------------------------
 @app.get("/")
 async def root():
     return {"status": "Bot attivo"}
+
+
+# --------------------------
+# Test connessione Telegram
+# --------------------------
+@app.get("/test_telegram")
+async def test_telegram():
+    try:
+        token = os.getenv("TG_BOT_TOKEN")
+        if not token:
+            return {"success": False, "error": "Variabile TG_BOT_TOKEN non trovata"}
+
+        url = f"https://api.telegram.org/bot{token}/getMe"
+        res = requests.get(url, timeout=10)
+        res.raise_for_status()
+        return {"success": True, "data": res.json()}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
