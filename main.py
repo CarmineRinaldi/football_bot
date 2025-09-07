@@ -1,10 +1,15 @@
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from db import add_user, get_user_plan, add_ticket, get_user_tickets
 from football_api import get_leagues, get_national_teams, get_matches, search_teams, filter_by_letter
+from stripe_webhook import handle_stripe_event
 from datetime import datetime
 import os
 
 FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
 VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
+
+app = FastAPI()
 
 # --------------------------
 # Menu principale e piani
@@ -121,3 +126,32 @@ def handle_back(update, context, last_state):
         return show_plan_info(update, context, context.get("current_plan"))
     else:
         return show_main_menu(update, context)
+
+# --------------------------
+# FastAPI endpoints
+# --------------------------
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Bot attivo"}
+
+@app.post("/stripe-webhook")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    result = handle_stripe_event(payload, sig_header)
+    return JSONResponse(content=result)
+
+@app.post("/telegram-webhook")
+async def telegram_webhook(update: dict):
+    """
+    Endpoint per simulare il webhook Telegram.
+    """
+    context = {}
+    if "message" in update:
+        return start(update, context)
+    elif "callback_query" in update:
+        data = update["callback_query"]["data"]
+        if data == "back":
+            return handle_back(update, context, context.get("last_state"))
+        return {"text": f"Callback ricevuto: {data}"}
+    return {"text": "Aggiornamento non gestito"}
