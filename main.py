@@ -29,11 +29,12 @@ user_search_mode = {}
 
 async def send_message(chat_id, text, reply_markup=None):
     async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/sendMessage", json={
+        res = await client.post(f"{BASE_URL}/sendMessage", json={
             "chat_id": chat_id,
             "text": text,
             "reply_markup": reply_markup
         })
+        return res.json()
 
 async def delete_message(chat_id, message_id):
     async with httpx.AsyncClient() as client:
@@ -43,13 +44,13 @@ async def delete_message(chat_id, message_id):
         })
 
 async def send_waiting_message(chat_id):
-    """Invia messaggio di attesa e restituisce l'ID del messaggio."""
+    """Mostra un messaggio di attesa e ritorna il message_id."""
     async with httpx.AsyncClient() as client:
         res = await client.post(f"{BASE_URL}/sendMessage", json={
             "chat_id": chat_id,
-            "text": "⌛ Sto caricando i dati, attendi un attimo...",
+            "text": "⏳ Attendere prego..."
         })
-        return (await res.json())["result"]["message_id"]
+        return res.json()["result"]["message_id"]
 
 # --------------------------
 # Webhook
@@ -99,29 +100,30 @@ async def telegram_webhook(req: Request):
         message_id = cb["message"]["message_id"]
         cb_data = cb["data"]
 
-        # eliminiamo il messaggio originale per pulizia
-        await delete_message(chat_id, message_id)
-
-        # INVIO messaggio di attesa
+        # Mostra messaggio di attesa
         waiting_msg_id = await send_waiting_message(chat_id)
 
-        # --------------------------
+        await delete_message(chat_id, message_id)
+
         # Menu principale
         if cb_data == "main_menu":
             response = show_main_menu(data, None)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
         elif cb_data in ["plan_free", "plan_2eur", "plan_vip"]:
             plan = cb_data.split("_")[1]
             response = show_plan_info(data, None, plan)
-        
-        # --------------------------
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
+
         # Selezione alfabetica
         elif cb_data.startswith("select_league_"):
             plan = cb_data.split("_")[-1]
             response = show_alphabet_keyboard(plan, "league")
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
         elif cb_data.startswith("select_national_"):
             plan = cb_data.split("_")[-1]
             response = show_alphabet_keyboard(plan, "national")
-        
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
+
         # Filtri per lettera
         elif cb_data.startswith("filter_"):
             parts = cb_data.split("_")
@@ -129,6 +131,7 @@ async def telegram_webhook(req: Request):
             letter = parts[2]
             plan = parts[3]
             response = show_filtered_options(type_, letter, plan)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
 
         # Mostra partite da lega/nazionale
         elif cb_data.startswith("league_") or cb_data.startswith("national_"):
@@ -136,12 +139,14 @@ async def telegram_webhook(req: Request):
             league_id = int(parts[1])
             plan = parts[2]
             response = show_matches(data, None, league_id, plan)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
 
         # Modalità ricerca squadra
         elif cb_data.startswith("search_team_"):
             plan = cb_data.split("_")[-1]
             user_search_mode[chat_id] = plan
             response = search_team_prompt(plan)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
 
         # Click su squadra dai risultati ricerca
         elif cb_data.startswith("team_"):
@@ -149,13 +154,10 @@ async def telegram_webhook(req: Request):
             match_id = int(parts[1])
             plan = parts[2]
             response = show_matches(data, None, match_id, plan)
+            await send_message(chat_id, response["text"], response.get("reply_markup"))
 
-        # --------------------------
-        # Elimina messaggio di attesa
+        # Rimuove messaggio di attesa
         await delete_message(chat_id, waiting_msg_id)
-
-        # INVIO messaggio finale
-        await send_message(chat_id, response["text"], response.get("reply_markup"))
 
     return {"status": 200}
 
