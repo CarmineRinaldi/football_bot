@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from bot_logic import start, show_main_menu
-from db import init_db  # ✅ import DB init
+from db import init_db
 import uvicorn
 
 app = FastAPI()
@@ -17,14 +18,18 @@ init_db()
 async def telegram_webhook(update: Request):
     data = await update.json()
     context = {}
+
     if "message" in data:
-        return start(data, context)
+        response = start(data, context)
+        return JSONResponse(content=response)  # ✅ Converte in JSON valido
     elif "callback_query" in data:
         cb_data = data["callback_query"]["data"]
         if cb_data == "back":
-            return show_main_menu(data, context)
-        return {"text": f"Callback ricevuto: {cb_data}"}
-    return {"text": "Aggiornamento non gestito"}
+            response = show_main_menu(data, context)
+            return JSONResponse(content=response)
+        return JSONResponse(content={"text": f"Callback ricevuto: {cb_data}"})
+
+    return JSONResponse(content={"text": "Aggiornamento non gestito"})
 
 @app.get("/")
 async def root():
