@@ -131,3 +131,59 @@ def create_ticket(user_id, match_ids):
     add_ticket(user_id, match_ids)
     total_today = len([t for t in get_user_tickets(user_id) if datetime.fromisoformat(t[2]).date() == datetime.utcnow().date()])
     return {"text": f"✅ Pronostico creato con {len(match_ids)} partite!\nPronostico numero {total_today} di oggi."}
+
+
+# --------------------------
+# GESTORE CALLBACK COMPLETO
+# --------------------------
+
+def handle_callback(callback_data, update, context):
+    user_id = update["callback_query"]["from"]["id"]
+
+    # Menu principale
+    if callback_data == "main_menu":
+        return show_main_menu(update, context)
+
+    # Selezione piano
+    if callback_data.startswith("plan_"):
+        plan = callback_data.split("_")[1]
+        return show_plan_info(update, context, plan)
+
+    # Campionati paginati
+    if callback_data.startswith("select_league_"):
+        plan = callback_data.split("_")[-1]
+        return show_leagues(update, context, plan)
+
+    # Nazionali paginati
+    if callback_data.startswith("select_national_"):
+        plan = callback_data.split("_")[-1]
+        return show_nationals(update, context, plan)
+
+    # Pagine campionati/nazionali
+    if "_page_" in callback_data:
+        parts = callback_data.split("_")
+        prefix = parts[0]
+        page = int(parts[2])
+        plan = parts[3]
+        if prefix == "league":
+            return show_leagues(update, context, plan, page)
+        else:
+            return show_nationals(update, context, plan, page)
+
+    # Ricerca
+    if callback_data.startswith("search_"):
+        plan = callback_data.split("_")[1]
+        return {"text": "Scrivi il nome della squadra o del campionato da cercare:"}
+
+    # Risultati ricerca
+    if callback_data.startswith("search_result_"):
+        parts = callback_data.split("_")
+        league_id = parts[2]
+        plan = parts[3]
+        return show_matches(update, context, league_id, plan)
+
+    # Selezione partita
+    if callback_data.startswith("match_"):
+        match_id = callback_data.split("_")[1]
+        # Qui puoi aggiungere logica per salvare il match selezionato
+        return {"text": f"✅ Hai selezionato la partita {match_id}!"}
