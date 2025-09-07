@@ -1,37 +1,35 @@
-from db import add_user, get_user_plan
-from football_api import get_leagues, get_national_teams, get_matches, search_teams, filter_by_letter
 import os
 import requests
+from db import add_user, get_user_plan
+from football_api import get_leagues, get_national_teams, get_matches, search_teams, filter_by_letter
+
+# --------------------------
+# Config
+# --------------------------
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
 VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # --------------------------
-# Funzione invio messaggi
+# Helper Telegram
 # --------------------------
-def send_message(chat_id, text, reply_markup=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown"
-    }
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-    requests.post(url, json=payload)
+def send_message(chat_id, text, keyboard=None):
+    data = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    if keyboard:
+        data["reply_markup"] = {"inline_keyboard": keyboard}
+    requests.post(f"{BASE_URL}/sendMessage", json=data)
 
 # --------------------------
-# Menu principale e piani
+# Start & Menù principale
 # --------------------------
 def start(update, context):
     user_id = update["message"]["from"]["id"]
     add_user(user_id)
-    response = show_main_menu(update, context)
-    send_message(user_id, response["text"], response.get("reply_markup"))
-    return {"ok": True}
+    show_main_menu(update, context, send=True)
 
-def show_main_menu(update, context):
+def show_main_menu(update, context, send=False):
     keyboard = [
         [{"text": "Free Plan 🆓", "callback_data": "plan_free"}],
         [{"text": "2€ Pack 💶", "callback_data": "plan_2eur"}],
@@ -39,9 +37,18 @@ def show_main_menu(update, context):
         [{"text": "Le mie schedine 📋", "callback_data": "my_tickets"}]
     ]
     message = "⚽ Benvenuto nel tuo stadio personale!\nScegli un piano o controlla le tue schedine:"
-    return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
+    if send:
+        chat_id = update["message"]["from"]["id"]
+        send_message(chat_id, message, keyboard)
+    else:
+        return {"text": message, "reply_markup": {"inline_keyboard": keyboard}}
 
-def show_plan_info(user_id, plan):
+# --------------------------
+# Info piano
+# --------------------------
+def show_plan_info(update, context, plan, send=False):
+    chat_id = update["message"]["from"]["id"] if "message" in update else update["callback_query"]["from"]["id"]
+
     if plan == "free":
         text = f"🆓 **Free Plan:** puoi fare fino a {FREE_MAX_MATCHES} pronostici al giorno, massimo 5 partite per pronostico!"
     elif plan == "2eur":
@@ -55,12 +62,16 @@ def show_plan_info(user_id, plan):
         [{"text": "Cerca squadra 🔎", "callback_data": f"search_team_{plan}"}],
         [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
     ]
-    return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
+    if send:
+        send_message(chat_id, text, keyboard)
+    else:
+        return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
 # --------------------------
-# Filtri e ricerca
+# Selezione tipo: lettera o nome
 # --------------------------
-def show_search_choice(type_, plan):
+def show_search_choice(update, context, type_, plan, send=False):
+    chat_id = update["message"]["from"]["id"] if "message" in update else update["callback_query"]["from"]["id"]
     tipo_testo = "campionato" if type_ == "league" else "nazionale"
     keyboard = [
         [{"text": "Per lettera 🔤", "callback_data": f"search_letter_{type_}_{plan}"}],
@@ -68,47 +79,98 @@ def show_search_choice(type_, plan):
         [{"text": "🔙 Indietro", "callback_data": "back"}],
         [{"text": "🏟️ Menù principale calcistico", "callback_data": "main_menu"}]
     ]
-    return {"text": f"🔍 Scegli come cercare il {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
+    text = f"🔍 Scegli come cercare il {tipo_testo}:"
+    if send:
+        send_message(chat_id, text, keyboard)
+    else:
+        return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
-def show_alphabet_keyboard(plan, type_):
+# --------------------------
+# Filtri alfabetici
+# --------------------------
+def show_alphabet_keyboard(update, context, plan, type_, send=False):
+    chat_id = update["message"]["from"]["id"] if "message" in update else update["callback_query"]["from"]["id"]
     keyboard = [[{"text": c, "callback_data": f"filter_{type_}_{c}_{plan}"}] for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     tipo_testo = "campionato" if type_ == "league" else "nazionale"
-    return {"text": f"🔤 Filtra per lettera iniziale del {tipo_testo}:", "reply_markup": {"inline_keyboard": keyboard}}
+    text = f"🔤 Filtra per lettera iniziale del {tipo_testo}:"
+    if send:
+        send_message(chat_id, text, keyboard)
+    else:
+        return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
-def show_filtered_options(type_, letter, plan):
+def show_filtered_options(update, context, type_, letter, plan, send=False):
+    chat_id = update["message"]["from"]["id"] if "message" in update else update["callback_query"]["from"]["id"]
     items = get_leagues() if type_ == "league" else get_national_teams()
     filtered = filter_by_letter(items, "display_name", letter)
-
     if not filtered:
-        return {"text": f"😕 Nessun {type_} trovato con la lettera '{letter}'.",
-                "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}}
+        text = f"😕 Nessun {type_} trovato con la lettera '{letter}'."
+        keyboard = [[{"text": "🔙 Indietro", "callback_data": "back"}]]
+        if send:
+            send_message(chat_id, text, keyboard)
+        else:
+            return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
+        return
 
     keyboard = [[{"text": o["display_name"], "callback_data": f"{type_}_{o['league']['id']}_{plan}"}] for o in filtered]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
-    return {"text": f"🏟️ Seleziona {type_}:", "reply_markup": {"inline_keyboard": keyboard}}
+    text = f"🏟️ Seleziona {type_}:"
+    if send:
+        send_message(chat_id, text, keyboard)
+    else:
+        return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
-def show_matches(league_id, plan):
+# --------------------------
+# Mostra partite
+# --------------------------
+def show_matches(update, context, league_id, plan, send=False):
+    chat_id = update["message"]["from"]["id"] if "message" in update else update["callback_query"]["from"]["id"]
     matches = get_matches(league_id)
     if not matches:
-        return {"text": "⚽ Nessuna partita disponibile per questa competizione!",
-                "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}}
+        text = "⚽ Nessuna partita disponibile per questa competizione!"
+        keyboard = [[{"text": "🔙 Indietro", "callback_data": "back"}]]
+        if send:
+            send_message(chat_id, text, keyboard)
+        else:
+            return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
+        return
 
     keyboard = [[{"text": f"{m['teams']['home']['name']} vs {m['teams']['away']['name']}",
                   "callback_data": f"match_{m['fixture']['id']}_{plan}"}] for m in matches]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
-    return {"text": "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:",
-            "reply_markup": {"inline_keyboard": keyboard}}
+    text = "⚽ Seleziona fino a 5 partite per il pronostico giornaliero:"
+    if send:
+        send_message(chat_id, text, keyboard)
+    else:
+        return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
 
-def search_team_prompt(plan):
-    return {"text": "🔎 Scrivi il nome della squadra che vuoi cercare:", "reply_markup": None}
+# --------------------------
+# Ricerca squadra
+# --------------------------
+def search_team_prompt(update, context, plan, send=False):
+    chat_id = update["message"]["from"]["id"] if "message" in update else update["callback_query"]["from"]["id"]
+    text = "🔎 Scrivi il nome della squadra che vuoi cercare:"
+    if send:
+        send_message(chat_id, text)
+    else:
+        return {"text": text, "reply_markup": None}
 
-def show_search_results(query, plan, type_=None):
+def show_search_results(update, context, query, plan, type_=None, send=False):
+    chat_id = update["message"]["from"]["id"] if "message" in update else update["callback_query"]["from"]["id"]
     results = search_teams(query, type_)
     if not results:
-        return {"text": f"😕 Nessun risultato trovato per '{query}'.",
-                "reply_markup": {"inline_keyboard": [[{"text": "🔙 Indietro", "callback_data": "back"}]]}}
+        text = f"😕 Nessun risultato trovato per '{query}'."
+        keyboard = [[{"text": "🔙 Indietro", "callback_data": "back"}]]
+        if send:
+            send_message(chat_id, text, keyboard)
+        else:
+            return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
+        return
 
     keyboard = [[{"text": r["team"], "callback_data": f"team_{r['match_id']}_{plan}"}] for r in results]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
-    return {"text": f"🔍 Risultati per '{query}':", "reply_markup": {"inline_keyboard": keyboard}}
+    text = f"🔍 Risultati per '{query}':"
+    if send:
+        send_message(chat_id, text, keyboard)
+    else:
+        return {"text": text, "reply_markup": {"inline_keyboard": keyboard}}
