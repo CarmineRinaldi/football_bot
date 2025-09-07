@@ -94,6 +94,7 @@ def show_filtered_options(chat_id, type_, letter, plan):
                      [[{"text": "🔙 Indietro", "callback_data": "back"}]])
         return
 
+    # callback: league_<id>_<plan> oppure national_<id>_<plan>
     keyboard = [[{"text": o["display_name"], "callback_data": f"{type_}_{o['league']['id']}_{plan}"}] for o in filtered]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     send_message(chat_id, f"🏟️ Seleziona {type_}:", keyboard)
@@ -126,6 +127,6 @@ def show_search_results(chat_id, query, plan, type_=None):
                      [[{"text": "🔙 Indietro", "callback_data": "back"}]])
         return
 
-    keyboard = [[{"text": r["team"], "callback_data": f"team_{r['match_id']}_{plan}"}] for r in results]
+    keyboard = [[{"text": r["team"], "callback_data": f"team_{r['team_id']}_{plan}"}] for r in results]
     keyboard.append([{"text": "🔙 Indietro", "callback_data": "back"}])
     send_message(chat_id, f"🔍 Risultati per '{query}':", keyboard)
