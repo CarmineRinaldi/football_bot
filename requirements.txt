@@ -1,7 +1,4 @@
-aiogram>=3.3.0
-requests
-stripe
-aiofiles>=23.2.1,<24.2
-aiohttp~=3.8.5
-pydantic==2.11.7
-typing-extensions==4.12.2
+aiogram==3.22.0
+aiohttp==3.12.15
+requests==2.32.5
+stripe==12.5.1
