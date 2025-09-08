@@ -1,27 +1,31 @@
-import logging
-import os
-from aiogram import Bot, Dispatcher
+import os, logging, asyncio
+from aiogram import Bot, Dispatcher, types
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram import web
-from handlers import start, plans, search
+from handlers import start, free, vip, search
+from db import init_db
 
 logging.basicConfig(level=logging.INFO)
 
+# Token e URL presi da environment
 BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-WEBHOOK_PATH = "/"  # routing principale
+WEBHOOK_PATH = "/"
 
-# Config bot con default parse_mode
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-
 dp = Dispatcher(storage=MemoryStorage())
 
-# Registro gli handler
+# Init DB
+init_db()
+
+# Registrazione handler
 start.register_handlers(dp)
-plans.register_handlers(dp)
+free.register_handlers(dp)
+vip.register_handlers(dp)
 search.register_handlers(dp)
 
+# Startup/shutdown webhook
 async def on_startup():
     await bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH)
     logging.info(f"Webhook impostato su {WEBHOOK_URL}")
