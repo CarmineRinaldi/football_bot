@@ -1,10 +1,11 @@
 import os
 import logging
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
-# Importa gli handlers
+# Importa gli handlers (devono stare nella cartella handlers/)
 from handlers import start, plans, search
 
 # --- LOGGING ---
@@ -13,14 +14,17 @@ logger = logging.getLogger(__name__)
 
 # --- VARIABILI AMBIENTE ---
 BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # già settata su Render
-PORT = int(os.getenv("PORT", 8080))     # Render passa sempre PORT
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # deve finire con /webhook
+PORT = int(os.getenv("PORT", 8080))     # Render passa sempre la porta
 
 if not BOT_TOKEN or not WEBHOOK_URL:
     raise ValueError("TG_BOT_TOKEN e WEBHOOK_URL devono essere impostati!")
 
 # --- CREA BOT E DISPATCHER ---
-bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
 dp = Dispatcher()
 
 # --- REGISTRA HANDLERS ---
@@ -33,17 +37,18 @@ search.register_handlers(dp)
 async def on_startup(app: web.Application):
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"Webhook impostato su {WEBHOOK_URL}")
+    logger.info(f"✅ Webhook impostato su {WEBHOOK_URL}")
 
 async def on_shutdown(app: web.Application):
     await bot.session.close()
+    logger.info("🛑 Bot shutdown completato.")
 
 
 # --- MAIN ---
 def main():
     app = web.Application()
 
-    # webhook path (Telegram manda gli update qui)
+    # Telegram invia gli update a questo path
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
 
     # collega dispatcher e bot all'app
