@@ -1,5 +1,4 @@
+stripe==12.5.1
 flask==2.3.3
 python-telegram-bot==20.5
 requests==2.31.0
-stripe==12.5.1
-python-dotenv==1.1.1
