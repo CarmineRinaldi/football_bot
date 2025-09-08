@@ -1,5 +1,5 @@
 from aiogram import Router, types
-from ..buttons import main_menu
+from buttons import main_menu
 
 router = Router()
 
