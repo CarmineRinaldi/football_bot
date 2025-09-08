@@ -1,43 +1,59 @@
 import os
 import logging
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
+from aiogram.types import BaseChat
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
+
 from handlers import start, plans, search
 
+# --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+# --- ENV VARIABLES ---
+BOT_TOKEN = os.environ["TG_BOT_TOKEN"]
+WEBHOOK_URL = os.environ["WEBHOOK_URL"]
 
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode="HTML")
-)
-dp = Dispatcher()
+# --- BOT & DISPATCHER ---
+bot = Bot(token=BOT_TOKEN, parse_mode=None)  # parse_mode non più supportato direttamente
+dp = Dispatcher(storage=MemoryStorage())
 
-# Registrazione handler
-start.register_handlers(dp)
-plans.register_handlers(dp)
-search.register_handlers(dp)
+# --- REGISTER HANDLERS ---
+dp.include_router(start.router)
+dp.include_router(plans.router)
+dp.include_router(search.router)
 
-async def on_startup(app):
-    # 🔹 Rimuove eventuali webhook vecchi
-    await bot.delete_webhook(drop_pending_updates=True)
-    # 🔹 Imposta quello nuovo
+# --- WEBHOOK SETUP ---
+async def on_startup(app: web.Application):
+    # Cancella eventuali webhook vecchi
+    await bot.delete_webhook()
+    # Imposta il nuovo webhook
     await bot.set_webhook(WEBHOOK_URL)
-    logging.info(f"Webhook impostato su {WEBHOOK_URL}")
+    logger.info(f"Webhook impostato su {WEBHOOK_URL}")
 
+async def on_shutdown(app: web.Application):
+    await bot.delete_webhook()
+    await bot.session.close()
+    logger.info("Bot spento correttamente")
+
+# --- AIOHTTP HANDLER ---
 async def handle(request):
-    data = await request.json()
-    update = dp.bot.update_class.model_validate(data)
-    await dp.feed_update(bot, update)
-    return web.Response()
+    try:
+        data = await request.json()
+    except Exception:
+        return web.Response(text="OK")  # Ignore non-json requests
+    update = dp.bot.parse_update(data)
+    await dp.process_update(update)
+    return web.Response(text="OK")
 
+# --- AIOHTTP APP ---
 app = web.Application()
-app.router.add_post("/webhook", handle)
-
+app.router.add_post("/", handle)
 app.on_startup.append(on_startup)
+app.on_cleanup.append(on_shutdown)
 
 if __name__ == "__main__":
-    web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    port = int(os.environ.get("PORT", 8000))
+    logger.info(f"Avvio bot su porta {port}…")
+    web.run_app(app, host="0.0.0.0", port=port)
