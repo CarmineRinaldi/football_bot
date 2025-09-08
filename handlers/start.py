@@ -1,6 +1,7 @@
-from aiogram import types, Dispatcher
-from aiogram.filters import Command
-from .buttons import main_menu
+from aiogram import Router, types
+from ..buttons import main_menu
+
+router = Router()
 
 WELCOME_TEXT = (
     "⚽ <b>Benvenuto nel FootballBot!</b> ⚽\n\n"
@@ -13,8 +14,6 @@ WELCOME_TEXT = (
     "🏟️ Usa i pulsanti qui sotto per iniziare la partita!"
 )
 
+@router.message(commands=["start"])
 async def cmd_start(message: types.Message):
     await message.answer(WELCOME_TEXT, reply_markup=main_menu())
-
-def register_handlers(dp: Dispatcher):
-    dp.message.register(cmd_start, Command("start"))
