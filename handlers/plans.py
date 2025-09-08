@@ -1,9 +1,8 @@
 from aiogram import types
-from aiogram.filters import Text
-from buttons import plans_keyboard  # esempio markup
+from aiogram.filters import Command
 
-async def plan_free(message: types.Message):
-    await message.answer("Ecco il piano Free!", reply_markup=plans_keyboard)
+async def cmd_search(message: types.Message):
+    await message.answer("Funzione ricerca non ancora implementata.")
 
 def register_handlers(dp):
-    dp.message.register(plan_free, Text(text="Free"))
+    dp.message.register(cmd_search, Command(commands=["search"]))
