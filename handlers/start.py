@@ -1,9 +1,8 @@
-from aiogram import types
-from aiogram.filters import Command
-from buttons import main_menu  # import assoluto
+from aiogram import Dispatcher, types
+from buttons import main_menu
 
 async def cmd_start(message: types.Message):
-    await message.answer("Benvenuto al bot!", reply_markup=main_menu)
+    await message.answer("Benvenuto! Scegli un'opzione dal menu:", reply_markup=main_menu)
 
-def register_handlers(dp):
-    dp.message.register(cmd_start, Command(commands=["start"]))
+def register_handlers(dp: Dispatcher):
+    dp.message.register(cmd_start, commands=["start"])
