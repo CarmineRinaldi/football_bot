@@ -1,7 +1,8 @@
 from aiogram import Dispatcher, types
-
-async def search_team(message: types.Message):
-    await message.answer("Scrivi il nome della squadra da cercare:")
+from buttons import back_button
 
 def register_handlers(dp: Dispatcher):
-    dp.message.register(search_team, lambda m: m.text=="Cerca squadra")
+    @dp.callback_query(lambda c: c.data.startswith("search"))
+    async def search_menu(call: types.CallbackQuery):
+        await call.message.delete()
+        await call.message.answer("Cerca squadra o campionato:", reply_markup=back_button)
