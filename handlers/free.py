@@ -1,20 +1,24 @@
 from aiogram import Dispatcher, types
-from buttons import back_home
-from db import save_ticket, get_free_count, increment_free
-import os
-
-FREE_MAX = int(os.getenv("FREE_MAX_MATCHES", 5))
-
-async def free_section(message: types.Message):
-    current = get_free_count(message.from_user.id)
-    if current >= FREE_MAX:
-        await message.answer("Hai raggiunto il limite giornaliero delle schedine free!", reply_markup=back_home)
-        return
-
-    increment_free(message.from_user.id)
-    ticket = "Schedina Free: Juventus - Inter"  # placeholder
-    save_ticket(message.from_user.id, ticket)
-    await message.answer(f"Ecco la tua schedina free:\n{ticket}", reply_markup=back_home)
+from buttons import back_button
+from db import save_ticket
 
 def register_handlers(dp: Dispatcher):
-    dp.message.register(free_section, lambda m: m.text=="Free")
+    @dp.callback_query(lambda c: c.data.startswith("menu_free"))
+    async def free_menu(call: types.CallbackQuery):
+        # Auto-elimina vecchio messaggio
+        await call.message.delete()
+        # Mostra scelta campionati/nazionali
+        keyboard = types.InlineKeyboardMarkup(row_width=2)
+        keyboard.add(
+            types.InlineKeyboardButton("Campionati", callback_data="free_leagues"),
+            types.InlineKeyboardButton("Nazionali", callback_data="free_national")
+        )
+        keyboard.add(types.InlineKeyboardButton("🔙 Indietro", callback_data="back_home"))
+        await call.message.answer("Seleziona una sezione:", reply_markup=keyboard)
+
+    @dp.callback_query(lambda c: c.data.startswith("free_leagues"))
+    async def generate_ticket(call: types.CallbackQuery):
+        await call.message.delete()
+        ticket = "Schedina Free esempio: Roma vs Juventus 1X2"  # esempio
+        save_ticket(call.from_user.id, ticket)
+        await call.message.answer(f"🎫 La tua schedina:\n{ticket}", reply_markup=back_button)
