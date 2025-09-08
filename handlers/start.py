@@ -1,6 +1,6 @@
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command, Text
+from aiogram.filters import Command
 from buttons import main_menu
 
 router = Router()
@@ -15,9 +15,10 @@ async def cmd_start(message: Message):
         reply_markup=main_menu
     )
 
-@router.callback_query(Text("back_home"))
+@router.callback_query()
 async def back_home(query: CallbackQuery):
-    await query.message.edit_text(
-        "Sei tornato al menu principale",
-        reply_markup=main_menu
-    )
+    if query.data == "back_home":
+        await query.message.edit_text(
+            "Sei tornato al menu principale",
+            reply_markup=main_menu
+        )
