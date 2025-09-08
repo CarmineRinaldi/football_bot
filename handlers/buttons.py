@@ -1,19 +1,17 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-def main_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Free"), KeyboardButton(text="VIP")],
-            [KeyboardButton(text="Le mie schedine")],
-            [KeyboardButton(text="Cerca squadra")]
-        ],
-        resize_keyboard=True
-    )
+main_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Free")],
+        [KeyboardButton(text="VIP")]
+    ],
+    resize_keyboard=True
+)
 
-def back_home():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🏠 Torna al menu")]
-        ],
-        resize_keyboard=True
-    )
+plans_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Piano 1")],
+        [KeyboardButton(text="Piano 2")]
+    ],
+    resize_keyboard=True
+)
