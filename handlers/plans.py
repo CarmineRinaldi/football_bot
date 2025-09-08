@@ -45,4 +45,6 @@ async def my_tickets(message: types.Message):
         await message.answer("Non hai schedine attive 😢", reply_markup=back_home())
 
 def register_handlers(dp: Dispatcher):
-    dp.message.register(lambda m: plan_free(m, dp.bot), lambda m: "Free" in m.text)_
+    dp.message.register(lambda m: plan_free(m, dp.bot), lambda m: "Free" in m.text)
+    dp.message.register(lambda m: plan_vip(m, dp.bot), lambda m: "VIP" in m.text)
+    dp.message.register(my_tickets, lambda m: "schedine" in m.text.lower())
