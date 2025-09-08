@@ -1,15 +1,19 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 def main_menu():
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("Free", callback_data="plan_free"),
-        InlineKeyboardButton("VIP", callback_data="plan_vip"),
-        InlineKeyboardButton("Le mie schedine", callback_data="my_tickets")
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Free"), KeyboardButton(text="VIP")],
+            [KeyboardButton(text="Le mie schedine")],
+            [KeyboardButton(text="Cerca squadra")]
+        ],
+        resize_keyboard=True
     )
-    return keyboard
 
 def back_home():
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("🏠 Torna al menù principale", callback_data="back_home"))
-    return keyboard
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🏠 Torna al menu")]
+        ],
+        resize_keyboard=True
+    )
