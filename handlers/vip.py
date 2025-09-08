@@ -1,11 +1,8 @@
 from aiogram import Dispatcher, types
-from buttons import back_home
-from db import save_ticket
-
-async def vip_section(message: types.Message):
-    ticket = "Schedina VIP: Milan - Napoli"  # placeholder
-    save_ticket(message.from_user.id, ticket)
-    await message.answer(f"Ecco la tua schedina VIP:\n{ticket}", reply_markup=back_home)
+from buttons import back_button
 
 def register_handlers(dp: Dispatcher):
-    dp.message.register(vip_section, lambda m: m.text in ["Pack 2€", "VIP"])
+    @dp.callback_query(lambda c: c.data.startswith("menu_vip"))
+    async def vip_menu(call: types.CallbackQuery):
+        await call.message.delete()
+        await call.message.answer("Accedi ai pronostici VIP.", reply_markup=back_button)
