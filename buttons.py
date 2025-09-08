@@ -1,6 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Home / Menu principale
+# Menu principale
 main_menu = InlineKeyboardMarkup()
 main_menu.add(
     InlineKeyboardButton("Free", callback_data="menu_free"),
@@ -10,6 +10,7 @@ main_menu.add(
     InlineKeyboardButton("Cerca", callback_data="search")
 )
 
+# Indietro
 back_button = InlineKeyboardMarkup()
 back_button.add(
     InlineKeyboardButton("🔙 Indietro", callback_data="back_home")
