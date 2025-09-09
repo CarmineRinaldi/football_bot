@@ -5,19 +5,23 @@ from config import DATABASE_URL
 def init_db():
     conn = sqlite3.connect(DATABASE_URL)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY,
-                    telegram_id INTEGER UNIQUE,
-                    is_vip INTEGER DEFAULT 0,
-                    last_free TIMESTAMP
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS schedine (
-                    id INTEGER PRIMARY KEY,
-                    user_id INTEGER,
-                    match TEXT,
-                    created_at TIMESTAMP,
-                    FOREIGN KEY(user_id) REFERENCES users(id)
-                )''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            telegram_id INTEGER UNIQUE,
+            is_vip INTEGER DEFAULT 0,
+            last_free TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS schedine (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER,
+            match TEXT,
+            created_at TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    ''')
     conn.commit()
     conn.close()
 
