@@ -9,8 +9,7 @@ def get_matches(league_ids=None):
     params = {"league": ",".join(map(str, league_ids))} if league_ids else {}
     resp = requests.get(url, headers=headers, params=params)
     data = resp.json()
-    return [(m['fixture']['id'], m['teams']['home']['name'], m['teams']['away']['name'])
-            for m in data.get('response', [])]
+    return [(m['fixture']['id'], m['teams']['home']['name'], m['teams']['away']['name']) for m in data.get('response', [])]
 
 def get_prediction(fixture_id):
     headers = {"x-apisports-key": API_FOOTBALL_KEY}
@@ -18,5 +17,6 @@ def get_prediction(fixture_id):
     resp = requests.get(url, headers=headers)
     data = resp.json()
     if data.get("response"):
-        return data['response'][0]['predictions']['advice']
+        pred = data['response'][0]['predictions']['advice']
+        return pred
     return "N/A"
