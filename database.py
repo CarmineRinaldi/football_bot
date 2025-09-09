@@ -28,6 +28,21 @@ def add_user(telegram_id):
     conn.commit()
     conn.close()
 
+def get_user(telegram_id):
+    conn = sqlite3.connect(DATABASE_URL)
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE telegram_id=?", (telegram_id,))
+    user = c.fetchone()
+    conn.close()
+    return user
+
+def update_last_free(user_id):
+    conn = sqlite3.connect(DATABASE_URL)
+    c = conn.cursor()
+    c.execute("UPDATE users SET last_free=? WHERE id=?", (datetime.now(), user_id))
+    conn.commit()
+    conn.close()
+
 def add_schedina(user_id, match):
     conn = sqlite3.connect(DATABASE_URL)
     c = conn.cursor()
@@ -44,21 +59,6 @@ def get_schedine(user_id):
     rows = c.fetchall()
     conn.close()
     return [r[0] for r in rows]
-
-def get_user(telegram_id):
-    conn = sqlite3.connect(DATABASE_URL)
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE telegram_id=?", (telegram_id,))
-    user = c.fetchone()
-    conn.close()
-    return user
-
-def update_last_free(user_id):
-    conn = sqlite3.connect(DATABASE_URL)
-    c = conn.cursor()
-    c.execute("UPDATE users SET last_free=? WHERE id=?", (datetime.now(), user_id))
-    conn.commit()
-    conn.close()
 
 def cleanup_schedine():
     conn = sqlite3.connect(DATABASE_URL)
