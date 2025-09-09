@@ -1,7 +1,7 @@
 import os
 from flask import Flask, request
 from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackContext, Dispatcher
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import requests
 import stripe
 import sqlite3
@@ -37,13 +37,11 @@ app = Flask(__name__)
 # -------------------------
 bot = Bot(token=TOKEN)
 application = ApplicationBuilder().bot(bot).build()
-dispatcher: Dispatcher = application.dispatcher
 
 # -------------------------
 # FUNZIONI UTILI
 # -------------------------
 def init_db():
-    """Inizializza database se non esiste."""
     conn = sqlite3.connect(DATABASE_URL)
     c = conn.cursor()
     c.execute('''
@@ -82,18 +80,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Comandi disponibili:\n/start - Avvia il bot\n/help - Mostra questo messaggio")
 
-# Aggiungi qui eventuali altri comandi personalizzati
-dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(CommandHandler("help", help_command))
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("help", help_command))
 
 # -------------------------
 # ROUTE FLASK PER WEBHOOK
 # -------------------------
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    """Riceve aggiornamenti da Telegram via webhook."""
     update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
+    application.process_update(update)
     return "OK", 200
 
 # -------------------------
