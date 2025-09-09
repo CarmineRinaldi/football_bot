@@ -4,6 +4,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from config import TG_BOT_TOKEN, WEBHOOK_URL
 from handlers import start, button
 from database import init_db
+import asyncio
 
 app = Flask(__name__)
 
@@ -13,7 +14,7 @@ init_db()
 # Crea l’app Telegram
 application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
 
-# Aggiungi comandi e callback
+# Aggiungi i comandi e callback
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button))
 
@@ -24,7 +25,7 @@ def webhook():
     return "OK"
 
 if __name__ == "__main__":
-    # Imposta webhook
-    application.bot.set_webhook(WEBHOOK_URL)
+    # Imposta webhook in modo asincrono
+    asyncio.run(application.bot.set_webhook(WEBHOOK_URL))
     # Avvia Flask
     app.run(host="0.0.0.0", port=5000)
