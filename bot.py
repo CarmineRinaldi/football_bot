@@ -1,31 +1,40 @@
+import os
+import asyncio
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler
-from config import TG_BOT_TOKEN, WEBHOOK_URL
-from handlers import start, button
-from database import init_db
-import asyncio
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+# Configurazione
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # es. https://football-bot-ric2.onrender.com/<TOKEN>
 
 app = Flask(__name__)
 
-# Inizializza DB
-init_db()
+# Crea l'app Telegram
+application = ApplicationBuilder().token(TOKEN).build()
 
-# Crea l’app Telegram
-application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
+# Esempio di comando /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Ciao! Il bot è attivo ⚽")
 
-# Aggiungi i comandi e callback
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(button))
 
-@app.route("/", methods=["POST"])
+# Endpoint Flask per webhook
+@app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    application.update_queue.put(update)
-    return "OK"
+    asyncio.run(application.update_queue.put(update))
+    return "ok"
 
+# Funzione principale per settare webhook e avviare Flask
+async def main():
+    # Imposta webhook (corretto con await)
+    await application.bot.set_webhook(WEBHOOK_URL)
+    print(f"Webhook settato su: {WEBHOOK_URL}")
+
+    # Flask rimane in ascolto
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+# Avvia tutto
 if __name__ == "__main__":
-    # Imposta webhook in modo asincrono
-    asyncio.run(application.bot.set_webhook(WEBHOOK_URL))
-    # Avvia Flask
-    app.run(host="0.0.0.0", port=5000)
+    asyncio.run(main())
