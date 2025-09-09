@@ -4,6 +4,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from config import TG_BOT_TOKEN, WEBHOOK_URL
 from handlers import start, button
 from database import init_db
+import asyncio
 
 app = Flask(__name__)
 
@@ -21,11 +22,11 @@ application.add_handler(CallbackQueryHandler(button))
 def webhook():
     """Riceve gli update da Telegram e li passa all’applicazione"""
     update = Update.de_json(request.get_json(force=True), application.bot)
-    application.update_queue.put(update)
+    asyncio.run(application.process_update(update))
     return "OK"
 
 if __name__ == "__main__":
     # Imposta il webhook su Render
-    application.bot.set_webhook(WEBHOOK_URL)
+    asyncio.run(application.bot.set_webhook(WEBHOOK_URL))
     # Avvia Flask
     app.run(host="0.0.0.0", port=5000)
