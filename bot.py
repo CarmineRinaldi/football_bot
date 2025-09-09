@@ -5,6 +5,7 @@ from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import stripe
 import asyncio
+import threading
 
 # --- CONFIG ---
 TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -117,30 +118,30 @@ def stripe_webhook():
 @app.route(f"/{TOKEN}", methods=["POST"])
 def telegram_webhook():
     update = Update.de_json(request.get_json(force=True), bot)
-    # Crea un loop ad hoc per il thread corrente
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(application.update_queue.put(update))
-    loop.close()
+    # schedula la coroutine nel loop globale di Telegram
+    asyncio.run_coroutine_threadsafe(application.update_queue.put(update), telegram_loop)
     return "OK", 200
 
 # --- MAIN ---
 def main():
     init_db()
 
-    # Aggiungi handler Telegram
+    # aggiungi handler Telegram
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("matches", matches))
     application.add_handler(CommandHandler("help", help_command))
 
-    # Imposta webhook con loop ad hoc
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(bot.delete_webhook())
-    loop.run_until_complete(bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}"))
-    loop.close()
+    # crea un loop globale per Telegram
+    global telegram_loop
+    telegram_loop = asyncio.new_event_loop()
+    t = threading.Thread(target=lambda: telegram_loop.run_forever(), daemon=True)
+    t.start()
 
-    # Avvia Flask
+    # imposta webhook
+    asyncio.run_coroutine_threadsafe(bot.delete_webhook(), telegram_loop).result()
+    asyncio.run_coroutine_threadsafe(bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}"), telegram_loop).result()
+
+    # avvia Flask
     PORT = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=PORT)
 
