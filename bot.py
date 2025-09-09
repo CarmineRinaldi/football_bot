@@ -117,9 +117,11 @@ def stripe_webhook():
 @app.route(f"/{TOKEN}", methods=["POST"])
 def telegram_webhook():
     update = Update.de_json(request.get_json(force=True), bot)
-    # Usa il loop corrente senza asyncio.run()
-    loop = asyncio.get_event_loop()
-    loop.create_task(application.update_queue.put(update))
+    # Crea un loop ad hoc per il thread corrente
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(application.update_queue.put(update))
+    loop.close()
     return "OK", 200
 
 # --- MAIN ---
@@ -131,10 +133,12 @@ def main():
     application.add_handler(CommandHandler("matches", matches))
     application.add_handler(CommandHandler("help", help_command))
 
-    # Imposta webhook senza chiudere loop
-    loop = asyncio.get_event_loop()
+    # Imposta webhook con loop ad hoc
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(bot.delete_webhook())
     loop.run_until_complete(bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}"))
+    loop.close()
 
     # Avvia Flask
     PORT = int(os.environ.get("PORT", 5000))
