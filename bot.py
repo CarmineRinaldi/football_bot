@@ -8,10 +8,10 @@ import asyncio
 
 app = Flask(__name__)
 
-# Inizializza DB
+# Inizializza il DB
 init_db()
 
-# Crea l’app Telegram
+# Crea l'app Telegram asincrona
 application = ApplicationBuilder().token(TG_BOT_TOKEN).build()
 
 # Aggiungi i comandi e callback
@@ -20,13 +20,13 @@ application.add_handler(CallbackQueryHandler(button))
 
 @app.route("/", methods=["POST"])
 def webhook():
-    """Riceve gli update da Telegram e li passa all’applicazione"""
+    """Riceve gli update da Telegram e li passa all'applicazione"""
     update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
+    asyncio.run(application.update_queue.put(update))
     return "OK"
 
 if __name__ == "__main__":
-    # Imposta il webhook su Render
+    # Imposta il webhook (await correttamente)
     asyncio.run(application.bot.set_webhook(WEBHOOK_URL))
     # Avvia Flask
     app.run(host="0.0.0.0", port=5000)
