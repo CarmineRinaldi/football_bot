@@ -1,10 +1,10 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
 from database import add_user, get_schedine, add_schedina, get_user, update_last_free
 from utils import waiting_message, can_use_free
 from config import FREE_MAX_MATCHES, VIP_MAX_MATCHES
 
-def start(update, context: CallbackContext):
+def start(update: Update, context: CallbackContext):
     add_user(update.effective_user.id)
     keyboard = [
         [InlineKeyboardButton("Free", callback_data='plan_free')],
@@ -14,7 +14,7 @@ def start(update, context: CallbackContext):
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text("Benvenuto! Scegli un piano:", reply_markup=reply_markup)
 
-def button(update, context):
+def button(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     user = get_user(query.from_user.id)
