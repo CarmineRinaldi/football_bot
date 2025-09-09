@@ -2,8 +2,9 @@ import os
 import sqlite3
 from flask import Flask, request
 from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import stripe
+import asyncio
 
 # --- CONFIG ---
 TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -59,6 +60,7 @@ def increment_matches(user_id):
 
 # --- TELEGRAM BOT ---
 bot = Bot(token=TOKEN)
+application = ApplicationBuilder().token(TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -115,23 +117,23 @@ def stripe_webhook():
 @app.route(f"/{TOKEN}", methods=["POST"])
 def telegram_webhook():
     update = Update.de_json(request.get_json(force=True), bot)
-    application.bot.process_update(update)
+    asyncio.run(application.update_queue.put(update))
     return "OK", 200
 
 # --- MAIN ---
 def main():
-    global application
     init_db()
-    application = ApplicationBuilder().token(TOKEN).build()
+
+    # Aggiungi handler Telegram
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("matches", matches))
     application.add_handler(CommandHandler("help", help_command))
 
-    # Set Telegram webhook
-    bot.delete_webhook()
-    bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    # Set Telegram webhook correttamente
+    asyncio.run(bot.delete_webhook())
+    asyncio.run(bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}"))
 
-    # Start Flask app
+    # Avvia Flask
     PORT = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=PORT)
 
