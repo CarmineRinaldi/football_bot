@@ -1,8 +1,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
-from database import add_user, get_schedine, add_schedina, get_user, update_last_free
-from utils import waiting_message, can_use_free
-from config import FREE_MAX_MATCHES, VIP_MAX_MATCHES
+from database import add_user, get_user, update_last_free
+from utils import can_use_free
 
 def start(update: Update, context: CallbackContext):
     add_user(update.effective_user.id)
