@@ -1,46 +1,27 @@
 import os
+import sqlite3
 from flask import Flask, request
 from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import requests
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 import stripe
-import sqlite3
 
-# -------------------------
-# VARIABILI D'AMBIENTE
-# -------------------------
+# --- CONFIG ---
 TOKEN = os.getenv("TG_BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-PORT = int(os.environ.get("PORT", 8443))
 DATABASE_URL = os.getenv("DATABASE_URL", "users.db")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_ENDPOINT_SECRET = os.getenv("STRIPE_ENDPOINT_SECRET")
-STRIPE_PRICE_2EUR = os.getenv("STRIPE_PRICE_2EUR")
-STRIPE_PRICE_VIP = os.getenv("STRIPE_PRICE_VIP")
 FREE_MAX_MATCHES = int(os.getenv("FREE_MAX_MATCHES", 5))
 VIP_MAX_MATCHES = int(os.getenv("VIP_MAX_MATCHES", 20))
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
-ADMIN_HTTP_TOKEN = os.getenv("ADMIN_HTTP_TOKEN")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_PRICE_2EUR = os.getenv("STRIPE_PRICE_2EUR")
+STRIPE_PRICE_VIP = os.getenv("STRIPE_PRICE_VIP")
+STRIPE_ENDPOINT_SECRET = os.getenv("STRIPE_ENDPOINT_SECRET")
 
-# -------------------------
-# SETUP STRIPE
-# -------------------------
 stripe.api_key = STRIPE_SECRET_KEY
 
-# -------------------------
-# INIZIALIZZAZIONE FLASK
-# -------------------------
+# --- FLASK APP ---
 app = Flask(__name__)
 
-# -------------------------
-# INIZIALIZZAZIONE BOT
-# -------------------------
-bot = Bot(token=TOKEN)
-application = ApplicationBuilder().bot(bot).build()
-
-# -------------------------
-# FUNZIONI UTILI
-# -------------------------
+# --- DATABASE ---
 def init_db():
     conn = sqlite3.connect(DATABASE_URL)
     c = conn.cursor()
@@ -48,7 +29,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             is_vip INTEGER DEFAULT 0,
-            matches_played INTEGER DEFAULT 0
+            matches_used INTEGER DEFAULT 0
         )
     ''')
     conn.commit()
@@ -57,52 +38,102 @@ def init_db():
 def get_user(user_id):
     conn = sqlite3.connect(DATABASE_URL)
     c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    user = c.fetchone()
+    c.execute('SELECT user_id, is_vip, matches_used FROM users WHERE user_id=?', (user_id,))
+    row = c.fetchone()
     conn.close()
-    return user
+    return row
 
 def add_user(user_id):
     conn = sqlite3.connect(DATABASE_URL)
     c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    c.execute('INSERT OR IGNORE INTO users(user_id) VALUES(?)', (user_id,))
     conn.commit()
     conn.close()
 
-# -------------------------
-# HANDLER COMANDI
-# -------------------------
+def increment_matches(user_id):
+    conn = sqlite3.connect(DATABASE_URL)
+    c = conn.cursor()
+    c.execute('UPDATE users SET matches_used = matches_used + 1 WHERE user_id=?', (user_id,))
+    conn.commit()
+    conn.close()
+
+# --- TELEGRAM BOT ---
+bot = Bot(token=TOKEN)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     add_user(user_id)
-    await update.message.reply_text("Ciao! Bot attivo tramite webhook!")
+    await update.message.reply_text("Benvenuto! Usa /matches per vedere i tuoi match disponibili.")
+
+async def matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    if not user:
+        add_user(user_id)
+        user = get_user(user_id)
+    is_vip = user[1]
+    used = user[2]
+    max_matches = VIP_MAX_MATCHES if is_vip else FREE_MAX_MATCHES
+    remaining = max_matches - used
+    await update.message.reply_text(f"Hai {remaining} match disponibili.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Comandi disponibili:\n/start - Avvia il bot\n/help - Mostra questo messaggio")
+    await update.message.reply_text("/start - avvia il bot\n/matches - mostra match disponibili\n/help - mostra questo messaggio")
 
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("help", help_command))
+# --- STRIPE PAYMENT HANDLERS ---
+@app.route("/create-checkout-session/<price_id>/<int:user_id>", methods=["POST"])
+def create_checkout(price_id, user_id):
+    session = stripe.checkout.Session.create(
+        line_items=[{"price": price_id, "quantity": 1}],
+        mode="payment",
+        success_url=f"{WEBHOOK_URL}/success/{user_id}",
+        cancel_url=f"{WEBHOOK_URL}/cancel/{user_id}",
+    )
+    return {"url": session.url}
 
-# -------------------------
-# ROUTE FLASK PER WEBHOOK
-# -------------------------
+@app.route("/webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get("Stripe-Signature")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_ENDPOINT_SECRET)
+    except Exception as e:
+        return str(e), 400
+
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        user_id = int(session["success_url"].split("/")[-1])
+        conn = sqlite3.connect(DATABASE_URL)
+        c = conn.cursor()
+        c.execute('UPDATE users SET is_vip=1 WHERE user_id=?', (user_id,))
+        conn.commit()
+        conn.close()
+
+    return "", 200
+
+# --- TELEGRAM WEBHOOK ENDPOINT ---
 @app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
+def telegram_webhook():
     update = Update.de_json(request.get_json(force=True), bot)
-    application.process_update(update)
+    application.bot.process_update(update)
     return "OK", 200
 
-# -------------------------
-# SETUP WEBHOOK ALL'AVVIO
-# -------------------------
-@app.before_first_request
-def set_webhook():
+# --- MAIN ---
+def main():
+    global application
+    init_db()
+    application = ApplicationBuilder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("matches", matches))
+    application.add_handler(CommandHandler("help", help_command))
+
+    # Set Telegram webhook
     bot.delete_webhook()
     bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
 
-# -------------------------
-# AVVIO SERVER FLASK
-# -------------------------
-if __name__ == "__main__":
-    init_db()
+    # Start Flask app
+    PORT = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=PORT)
+
+if __name__ == "__main__":
+    main()
