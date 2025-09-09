@@ -1,29 +1,49 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
-from database import add_user, add_schedina, get_schedine
-from utils import waiting_message
+import aiosqlite
+from datetime import datetime, timedelta
+from config import DATABASE_URL
 
-# Comando /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    add_user(update.effective_user.id)
-    keyboard = [
-        [InlineKeyboardButton("Free", callback_data='plan_free')],
-        [InlineKeyboardButton("2€ pack", callback_data='plan_2eur')],
-        [InlineKeyboardButton("VIP 4,99€/mese", callback_data='plan_vip')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Benvenuto! Scegli un piano:", reply_markup=reply_markup)
+async def init_db():
+    async with aiosqlite.connect(DATABASE_URL) as conn:
+        await conn.execute('''CREATE TABLE IF NOT EXISTS users (
+                                id INTEGER PRIMARY KEY,
+                                telegram_id INTEGER UNIQUE,
+                                is_vip INTEGER DEFAULT 0,
+                                last_free TIMESTAMP
+                            )''')
+        await conn.execute('''CREATE TABLE IF NOT EXISTS schedine (
+                                id INTEGER PRIMARY KEY,
+                                user_id INTEGER,
+                                match TEXT,
+                                created_at TIMESTAMP,
+                                FOREIGN KEY(user_id) REFERENCES users(id)
+                            )''')
+        await conn.commit()
 
-# Gestione dei pulsanti
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(waiting_message())
-    # Qui puoi aggiungere la logica per free, VIP, ecc.
-    # Esempio:
-    if query.data == "plan_free":
-        await query.message.reply_text("Hai scelto il piano Free!")
-    elif query.data == "plan_2eur":
-        await query.message.reply_text("Hai scelto il piano 2€!")
-    elif query.data == "plan_vip":
-        await query.message.reply_text("Hai scelto il piano VIP!")
+async def add_user(telegram_id):
+    async with aiosqlite.connect(DATABASE_URL) as conn:
+        await conn.execute("INSERT OR IGNORE INTO users (telegram_id) VALUES (?)", (telegram_id,))
+        await conn.commit()
+
+async def add_schedina(user_id, match):
+    async with aiosqlite.connect(DATABASE_URL) as conn:
+        await conn.execute(
+            "INSERT INTO schedine (user_id, match, created_at) VALUES (?, ?, ?)",
+            (user_id, match, datetime.now())
+        )
+        await conn.commit()
+
+async def get_schedine(user_id):
+    async with aiosqlite.connect(DATABASE_URL) as conn:
+        limit_time = datetime.now() - timedelta(hours=48)
+        async with conn.execute(
+            "SELECT match FROM schedine WHERE user_id=? AND created_at>=?",
+            (user_id, limit_time)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows]
+
+async def cleanup_schedine():
+    async with aiosqlite.connect(DATABASE_URL) as conn:
+        limit_time = datetime.now() - timedelta(hours=48)
+        await conn.execute("DELETE FROM schedine WHERE created_at<?", (limit_time,))
+        await conn.commit()
