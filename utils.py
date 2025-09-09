@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from config import FREE_MAX_MATCHES, VIP_MAX_MATCHES
+from config import FREE_MAX_MATCHES
 
 def can_use_free(last_free, free_max=FREE_MAX_MATCHES):
     if not last_free:
